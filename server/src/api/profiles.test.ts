@@ -4,11 +4,15 @@ import { app, prisma } from '../app';
 
 describe('POST /api/profiles', () => {
   beforeAll(async () => {
-    await prisma.jobApplication.deleteMany({}); await prisma.candidateProfile.deleteMany();
+    await prisma.document.deleteMany({});
+    await prisma.jobApplication.deleteMany({});
+    await prisma.candidateProfile.deleteMany();
   });
 
   afterAll(async () => {
-    await prisma.jobApplication.deleteMany({}); await prisma.candidateProfile.deleteMany();
+    await prisma.document.deleteMany({});
+    await prisma.jobApplication.deleteMany({});
+    await prisma.candidateProfile.deleteMany();
     await prisma.$disconnect();
   });
 
