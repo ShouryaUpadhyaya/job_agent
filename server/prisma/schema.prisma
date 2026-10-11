@@ -36,13 +36,17 @@ model JobListing {
 }
 
 model CandidateProfile {
-  id         String   @id @default(uuid())
-  name       String
-  skills     String[]
-  experience Json?
-  education  Json?
-  applications JobApplication[]
-  documents    Document[]
+  id             String           @id @default(uuid())
+  name           String
+  email          String?
+  targetRole     String?          @default("Software Engineer Intern")
+  targetGradYear Int?             @default(2028)
+  rawResume      String?
+  skills         String[]
+  experience     Json?
+  education      Json?
+  applications   JobApplication[]
+  documents      Document[]
 }
 
 model JobApplication {
@@ -52,8 +56,11 @@ model JobApplication {
   candidateProfileId String
   candidateProfile   CandidateProfile @relation(fields: [candidateProfileId], references: [id])
   status             String           @default("DRAFT")
+  stage              String           @default("BOOKMARKED") // "BOOKMARKED", "APPLYING", "APPLIED", "INTERVIEWING", "OFFERED", "REJECTED", "ARCHIVED"
   isApproved         Boolean          @default(false)
   notes              String?
+  appliedUrl         String?
+  submittedAt        DateTime?
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   documents          Document[]
@@ -61,7 +68,7 @@ model JobApplication {
 
 model Document {
   id                 String           @id @default(uuid())
-  type               String           // "RESUME" or "COVER_LETTER"
+  type               String           // "RESUME", "COVER_LETTER", "TAILORED_RESUME"
   version            Int              @default(1)
   content            String
   candidateProfileId String
@@ -92,4 +99,19 @@ model SyncRun {
   completedAt   DateTime?
   durationMs    Int?
 }
+
+model JobSourceConfig {
+  id           String    @id @default(uuid())
+  sourceType   String    // "greenhouse", "ashby", "lever", "arbeitnow"
+  name         String    // e.g. "Cloudflare", "Linear", "Spotify", "Netflix"
+  boardToken   String    // e.g. "cloudflare", "linear", "spotify", "netflix"
+  enabled      Boolean   @default(true)
+  lastSyncedAt DateTime?
+  jobCount     Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([sourceType, boardToken])
+}
+
 

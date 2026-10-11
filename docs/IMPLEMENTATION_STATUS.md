@@ -4,7 +4,24 @@ This board tracks the priority, status, test verification, and architecture deci
 
 ---
 
+## Sprint 3 — Resume Parser, ATS Tailoring, Multi-Source Manager & Pipeline (VERIFIED & COMPLETED)
+
+| ID | Description | Component | Status | Tests | Verification Summary |
+|---|---|---|---|---|---|
+| **S3-1** | Lever ATS Connector | `server/src/connectors/lever.ts` | **DONE** | 3 unit + live | Lever public posting JSON API. Live verified: Spotify (85 jobs), idempotent re-sync verified (85 updated, 0 duplicates). |
+| **S3-2** | Dynamic Sources Management | `server/src/api/sources.ts` | **DONE** | 5 API tests | `JobSourceConfig` table in Prisma, `/api/sources` CRUD, per-source sync endpoint. Verified adding Figma (150 jobs synced). |
+| **S3-3** | Open-source Resume Ingestion & Parser | `server/src/resumes/parser.ts` | **DONE** | 4 unit + API tests | Text extraction via `pdf-parse`, taxonomy matching across 40+ engineering skills, education, and graduation year (2028). Automatic database job rescoring. |
+| **S3-4** | ATS Resume & Cover Letter Tailoring Engine | `server/src/resumes/tailor.ts` | **DONE** | 2 unit + API tests | Direct skill matches vs missing keywords, grounded impact bullets, personalized cover letter generation saved to versioned `Document`. |
+| **S3-5** | Applications Pipeline & Stage Tracking | `server/src/api/applications.ts` | **DONE** | 3 integration tests | Stages (`BOOKMARKED`, `APPLYING`, `APPLIED`, `INTERVIEWING`, `OFFERED`, `REJECTED`), audit logs, notes, and strict human approval gate. |
+| **S3-6** | Applications Pipeline UI | `web/src/components/ApplicationsPipeline.tsx` | **DONE** | 3 component tests | Full kanban stage cards, stage selector dropdown, notes editor modal, remove action. |
+| **S3-7** | Target Companies & Sources UI | `web/src/components/SourcesManager.tsx` | **DONE** | 3 component tests | Dynamic table of employer boards across Greenhouse, Ashby, Lever, Arbeitnow, +Add Board form, enable/disable toggle, per-source sync. |
+| **S3-8** | Candidate Profile & Resume UI | `web/src/components/ProfileManager.tsx` | **DONE** | 3 component tests | Profile editor, skill tags management, PDF resume drag-and-drop upload and raw text paste parser with instant job rescoring feedback. |
+| **S3-9** | Unified Multi-Tab Cockpit & Tailoring Preview | `web/src/components/Dashboard.tsx` | **DONE** | 6 component tests | Top navigation bar with 4 tabs (Job Discovery, Applications Pipeline, Target Companies, Profile & Resume) + inline "Tailor Resume" ATS preview. |
+
+---
+
 ## Sprint 2 — Real Job Ingestion, Matching & Dashboard (VERIFIED & COMPLETED)
+
 
 | ID | Description | Component | Status | Tests | Verification Summary |
 |---|---|---|---|---|---|
@@ -95,9 +112,9 @@ This board tracks the priority, status, test verification, and architecture deci
 
 ## Test Suite Execution Summary
 
-- **Backend Test Suites:** 15 files, **39 passed** (0 failed).
-- **Frontend Test Suites:** 3 files, **10 passed** (0 failed).
-- **Total Tests Passing:** **49 / 49 (100% green)**.
+- **Backend Test Suites:** 21 files, **58 passed** (0 failed).
+- **Frontend Test Suites:** 6 files, **19 passed** (0 failed).
+- **Total Tests Passing:** **77 / 77 (100% green)**.
 
 ---
 
@@ -128,6 +145,7 @@ curl -X POST http://localhost:3001/api/sync -H "Content-Type: application/json" 
 ### 5. Check Live Ingestion & Health Status
 ```bash
 curl http://localhost:3001/api/sync/status
+curl http://localhost:3001/api/sources
 curl http://localhost:3001/health
 ```
 
@@ -135,3 +153,4 @@ curl http://localhost:3001/health
 ```bash
 ./scripts/backup.sh
 ```
+

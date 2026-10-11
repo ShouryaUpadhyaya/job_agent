@@ -2,6 +2,7 @@ import { prisma } from '../db';
 import { JobConnector, RawJobPayload } from '../connectors/types';
 import { GreenhouseConnector } from '../connectors/greenhouse';
 import { AshbyConnector } from '../connectors/ashby';
+import { LeverConnector } from '../connectors/lever';
 import { ArbeitnowConnector } from '../connectors/arbeitnow';
 import { processAndUpsertJob } from './normalization';
 
@@ -24,22 +25,25 @@ export interface SyncSummary {
 export class SyncService {
   private connectors: JobConnector[] = [];
   private isSyncRunning = false;
+  private hasCustomConnectors = false;
 
   constructor() {
-    // Default active production connectors
     this.connectors = [
       new GreenhouseConnector('cloudflare', 'Cloudflare'),
       new AshbyConnector('linear', 'Linear'),
+      new LeverConnector('spotify', 'Spotify'),
       new ArbeitnowConnector(),
     ];
   }
 
   registerConnector(connector: JobConnector) {
     this.connectors.push(connector);
+    this.hasCustomConnectors = true;
   }
 
   setConnectors(connectors: JobConnector[]) {
     this.connectors = connectors;
+    this.hasCustomConnectors = true;
   }
 
   getConnectors(): JobConnector[] {
@@ -48,6 +52,75 @@ export class SyncService {
 
   isSyncing(): boolean {
     return this.isSyncRunning;
+  }
+
+  static createConnector(config: { sourceType: string; boardToken: string; name: string }): JobConnector | null {
+    switch (config.sourceType.toLowerCase()) {
+      case 'greenhouse':
+        return new GreenhouseConnector(config.boardToken, config.name);
+      case 'ashby':
+        return new AshbyConnector(config.boardToken, config.name);
+      case 'lever':
+        return new LeverConnector(config.boardToken, config.name);
+      case 'arbeitnow':
+        return new ArbeitnowConnector();
+      default:
+        return null;
+    }
+  }
+
+  async ensureDefaultSources(): Promise<void> {
+    const count = await prisma.jobSourceConfig.count();
+    if (count === 0) {
+      const defaultConfigs = [
+        { sourceType: 'greenhouse', boardToken: 'cloudflare', name: 'Cloudflare' },
+        { sourceType: 'ashby', boardToken: 'linear', name: 'Linear' },
+        { sourceType: 'lever', boardToken: 'spotify', name: 'Spotify' },
+        { sourceType: 'arbeitnow', boardToken: 'global', name: 'Arbeitnow Tech' },
+      ];
+      for (const cfg of defaultConfigs) {
+        await prisma.jobSourceConfig.upsert({
+          where: {
+            sourceType_boardToken: {
+              sourceType: cfg.sourceType,
+              boardToken: cfg.boardToken,
+            },
+          },
+          update: {},
+          create: cfg,
+        });
+      }
+    }
+  }
+
+  async getActiveConnectors(): Promise<{ connector: JobConnector; configId?: string }[]> {
+    if (this.hasCustomConnectors) {
+      return this.connectors.map((c) => ({ connector: c }));
+    }
+
+    try {
+      await this.ensureDefaultSources();
+      const configs = await prisma.jobSourceConfig.findMany({
+        where: { enabled: true },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      const list: { connector: JobConnector; configId?: string }[] = [];
+      for (const cfg of configs) {
+        const conn = SyncService.createConnector(cfg);
+        if (conn) {
+          list.push({ connector: conn, configId: cfg.id });
+        }
+      }
+
+      if (list.length > 0) {
+        return list;
+      }
+    } catch {
+      // Fallback to in-memory defaults if DB is temporarily unreachable
+    }
+
+    return this.connectors.map((c) => ({ connector: c }));
   }
 
   async syncAll(options: { force?: boolean } = {}): Promise<SyncSummary> {
@@ -97,7 +170,10 @@ export class SyncService {
         });
       }
 
-      for (const connector of this.connectors) {
+      const activeList = await this.getActiveConnectors();
+
+      for (const item of activeList) {
+        const connector = item.connector;
         const sourceName = connector.name || (connector as any).source || 'Unknown';
         const syncRunStart = Date.now();
 
@@ -135,6 +211,16 @@ export class SyncService {
               durationMs,
             },
           });
+
+          if (item.configId) {
+            await prisma.jobSourceConfig.update({
+              where: { id: item.configId },
+              data: {
+                lastSyncedAt: new Date(),
+                jobCount: connectorNew + connectorUpdated,
+              },
+            }).catch(() => {});
+          }
 
           totalFetched += rawJobs.length;
           totalNew += connectorNew;
@@ -221,13 +307,15 @@ export class SyncService {
       orderBy: { completedAt: 'desc' },
     });
 
+    const activeList = await this.getActiveConnectors();
+
     return {
       isSyncing: this.isSyncRunning,
       totalJobs,
       lastSyncAt: lastSuccessRun?.completedAt || null,
-      activeConnectors: this.connectors.map((c) => ({
-        name: c.name || (c as any).source || 'Connector',
-        source: (c as any).source || 'Generic',
+      activeConnectors: activeList.map((item) => ({
+        name: item.connector.name || (item.connector as any).source || 'Connector',
+        source: (item.connector as any).source || 'Generic',
       })),
       recentRuns,
     };

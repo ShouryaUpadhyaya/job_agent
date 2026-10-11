@@ -37,3 +37,9 @@ coverage/
 # OS files
 .DS_Store
 Thumbs.db
+
+# User & Candidate Documents
+*.pdf
+*.docx
+*.doc
+

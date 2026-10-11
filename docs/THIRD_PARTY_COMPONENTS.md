@@ -39,6 +39,15 @@ This document maintains an accurate record of external open-source projects, API
 - **Known Limitations:**
   - European and remote-focused; requires filtering for India/Remote suitability.
 
+### 1.4 Lever Official Job Board API
+- **Origin / Source:** Lever Public API (`https://api.lever.co/v0/postings/{company}?mode=json`)
+- **License / Terms:** Permitted public career feed access for indexing job opportunities.
+- **Implementation in Code:** `server/src/connectors/lever.ts`
+- **Modifications / Enhancements:**
+  - Extracts title, location (including multi-location arrays), departments, and plain-text descriptions.
+  - Implements `cleanHtml` and canonicalization for application URLs.
+  - Integrated into `JobSourceConfig` dynamic management.
+
 ---
 
 ## 2. Architectural Patterns & Schema Standards
@@ -51,14 +60,30 @@ This document maintains an accurate record of external open-source projects, API
   - Modeled relational entities in PostgreSQL with Prisma ORM.
   - Stores education, experience, and projects in structured JSON columns with validated schemas.
 
-### 2.2 Idempotency & Deduplication Engine
+### 2.2 Open-Source Resume Parsing & Section Extraction
+- **Inspiration:** `xitanggg/open-resume` (MIT) & `jsonresume.org`
+- **Implementation in Code:** `server/src/resumes/parser.ts`
+- **Modifications / Enhancements:**
+  - Extracts plain text from PDF buffers via `pdf-parse`.
+  - Heuristic taxonomy matching across 40+ engineering skills, graduation cohort (2028), education, and project bullet points.
+  - Automatically triggers database job re-scoring on resume upload.
+
+### 2.3 ATS Resume & Cover Letter Tailoring Engine
+- **Inspiration:** `career-ops-hq/career-ops` (MIT)
+- **Implementation in Code:** `server/src/resumes/tailor.ts`
+- **Modifications / Enhancements:**
+  - Computes direct ATS skill matches vs missing keywords from target job description.
+  - Synthesizes grounded impact bullets and personalized cover letters without hallucination.
+  - Generates versioned `Document` records in PostgreSQL.
+
+### 2.4 Idempotency & Deduplication Engine
 - **Inspiration:** `fahadNoufal/job-application-agent` (MIT) & `adgramigna/job-board-scraper` (MIT)
 - **Implementation in Code:** `server/src/jobs/normalization.ts`
 - **Modifications / Enhancements:**
   - Enforces compound unique database index `@@unique([externalId, source])` in Prisma.
   - Re-syncing the same job updates timestamps and score without creating duplicate records.
 
-### 2.3 Strict Human-in-the-Loop (HITL) Gate
+### 2.5 Strict Human-in-the-Loop (HITL) Gate
 - **Inspiration:** `AnshulDas007/Agentic-Job-Apply-Companion` (MIT)
 - **Implementation in Code:** `server/src/api/applications.ts` (`POST /api/applications/:id/submit`)
 - **Modifications / Enhancements:**
@@ -71,10 +96,13 @@ This document maintains an accurate record of external open-source projects, API
 
 | Package | Version | Purpose | License |
 |---|---|---|---|
-| `express` | `^4.21.1` | REST API server | MIT |
+| `express` | `^5.3.0` | REST API server | MIT |
 | `@prisma/client` | `5.22.0` | Type-safe PostgreSQL ORM | Apache-2.0 |
 | `vitest` | `^5.0.3` | Test runner & assertion library | MIT |
 | `next` | `16.4.0` | React web framework | MIT |
 | `react` | `19.3.0` | UI rendering | MIT |
 | `tailwindcss` | `^4` | Utility-first styling | MIT |
 | `rss-parser` | `^3.13.0` | RSS/Atom feed parsing | MIT |
+| `pdf-parse` | `^2.4.5` | PDF text extraction | MIT |
+| `multer` | `^1.4.5-lts.1` | Multipart file upload handling | MIT |
+

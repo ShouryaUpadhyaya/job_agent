@@ -11,6 +11,7 @@ import { profilesRouter } from './api/profiles';
 import { applicationsRouter } from './api/applications';
 import { copilotRouter } from './api/copilot';
 import { syncRouter } from './api/sync';
+import sourcesRouter from './api/sources';
 
 const app = express();
 app.use(cors());
@@ -31,5 +32,6 @@ app.use('/api', profilesRouter);
 app.use('/api', applicationsRouter);
 app.use('/api', copilotRouter);
 app.use('/api', syncRouter);
+app.use('/api/sources', sourcesRouter);
 
 export { app, prisma };

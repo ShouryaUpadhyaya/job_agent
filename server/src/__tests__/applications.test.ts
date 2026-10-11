@@ -4,6 +4,7 @@ import { app, prisma } from '../app';
 
 describe('Applications API', () => {
   beforeAll(async () => {
+    await prisma.document.deleteMany();
     await prisma.jobApplication.deleteMany();
     await prisma.jobListing.deleteMany();
     await prisma.candidateProfile.deleteMany();
