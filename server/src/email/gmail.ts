@@ -1,23 +1,17 @@
+import { classifyJobEmail, ComprehensiveClassification, ClassificationResult } from './classifier';
+
 export type EmailClassification = "INTERVIEW" | "REJECTION" | "UNKNOWN";
 
 export function classifyEmail(content: string): EmailClassification {
-  const lowerContent = content.toLowerCase();
-  
-  if (
-    lowerContent.includes("interview") ||
-    lowerContent.includes("scheduling") ||
-    lowerContent.includes("next step")
-  ) {
+  const result = classifyJobEmail({ subject: content, body: content });
+  if (result.classification === "INTERVIEW_INVITATION") {
     return "INTERVIEW";
   }
-  
-  if (
-    lowerContent.includes("unfortunately") ||
-    lowerContent.includes("other candidates") ||
-    lowerContent.includes("not moving forward")
-  ) {
+  if (result.classification === "REJECTION") {
     return "REJECTION";
   }
-  
   return "UNKNOWN";
 }
+
+export { classifyJobEmail };
+export type { ComprehensiveClassification, ClassificationResult };

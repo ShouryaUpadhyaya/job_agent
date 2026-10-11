@@ -83,41 +83,47 @@ During research, several other well-maintained community projects were identifie
 
 ---
 
-## Comparative Evaluation of Architectural Alternatives
+### Layer 4: Gmail Integration, OAuth & Email Synchronization
 
-### Layer 1: Job Discovery & ATS Ingestion
-
-| Candidate | Tech / Interface | Strengths | Weaknesses | Engineering Recommendation |
+| Candidate / Project | Tech / Interface | Strengths | Weaknesses | Engineering Recommendation |
 |---|---|---|---|---|
-| **Direct ATS API Endpoints** (Greenhouse, Ashby, Lever, Arbeitnow) | HTTP / JSON | Direct, official, zero HTML parsing fragility, high-speed, zero anti-bot issues | Requires knowing company board tokens | **ADOPT (Primary)**: Directly use official public ATS JSON endpoints for 100% reliable data extraction without DOM brittleness. |
-| **`adgramigna/job-board-scraper`** | Python / GitHub Actions | Multi-ATS support, handles pagination and normalization | Designed as standalone batch script, not an embedded library | **ADAPT PATTERNS**: Adopt its field normalization, error classification, and retry strategies. |
-| **`Apify Multi-ATS Actor`** | Hosted Apify / JS | Managed proxy rotation, anti-bot handling | Requires third-party cloud account and subscription | **REJECT FOR SELF-HOSTED**: Self-hosted Linux system should not depend on paid cloud scrapers when public endpoints are open. |
+| **Official `googleapis` Node.js SDK** (`google.gmail('v1')`) | TypeScript / Node.js | Official Google SDK, reliable OAuth2 token management, narrow scope control (`gmail.readonly`), zero third-party dependency risks | Low-level API requires building custom query batching and rate limiting | **ADOPT (Primary)**: Standardize on official `googleapis` OAuth2Client with AES-256 encrypted refresh tokens stored in PostgreSQL. |
+| **`CareerSync`** | TypeScript / OAuth2 / Gmail | Automated classification (Applied, Interview, Rejected), query filter presets | Cloud-centric, monolithic schema | **ADAPT PATTERNS**: Reuse query filter strings (`subject:(application OR interview OR offer OR rejection OR assessment OR "accepted your invitation")`) and status mapping. |
+| **`JustAJobApp`** | Python / Gmail API | Public curated filter lists for recruiter emails and ATS notification domains | Tightly coupled to external database | **ADAPT**: Port its whitelist of ATS sender domains (e.g. `greenhouse.io`, `lever.co`, `ashbyhq.com`, `messages-noreply@linkedin.com`, `wellfound.com`). |
+| **Direct IMAP / App Passwords** | Node.js `imap` / `mailparser` | Bypasses Google OAuth verification hurdles | Insecure; requires user to create and paste Google App Passwords; lacks granular revocation | **REJECT**: Google strongly discourages App Passwords for third-party tools. Use standard OAuth 2.0 with PKCE and narrow scopes. |
 
-### Layer 2: Resume Ingestion & Profile Taxonomy
+### Layer 5: LinkedIn Networking & Referral CRM
 
-| Candidate | Tech / Interface | Strengths | Weaknesses | Engineering Recommendation |
+| Candidate / Project | Tech / Interface | Strengths | Weaknesses | Engineering Recommendation |
 |---|---|---|---|---|
-| **JSON Resume Standard** (`jsonresume.org`) | Standard JSON Schema | Universal schema, supported across dozens of tools, handles education, skills, projects | Schema specification only, not a parser | **ADOPT (Schema)**: Standardize our internal candidate profile around the JSON Resume standard. |
-| **`xitanggg/open-resume`** | TypeScript / React / Next.js | Native TypeScript, runs in-process, handles PDF parsing without heavy Python service | Tied to React UI components | **ADAPT**: Reuse TypeScript type definitions and structured validation rules. |
-| **`pyresparser` / `spaCy`** | Python / NLP | Deep NLP entity extraction from raw text | Requires heavy Python runtime and spaCy model downloads (several hundred MBs) | **DEFER**: Unnecessary operational overhead for initial TypeScript monorepo when structured profile ingestion is already deterministic. |
+| **`PingCRM` / `Twenty`** | TypeScript / React / GraphQL | Clean relationship state machine (`RESEARCHED`, `REQUEST_SENT`, `ACCEPTED`, `MESSAGE_SENT`), interaction timeline | Enterprise scale, excessive overhead for a local solo job agent | **ADAPT CRM SCHEMA**: Adapt their lightweight relational model (`NetworkingContact`, `NetworkingMessage`) and interaction stage progression. |
+| **`Linki` / `LinkedIn-Automation`** | Python / Selenium / Chrome Extension | Automated connection requests and direct messaging | **High ban risk**: Violates LinkedIn User Agreement section 8.2; triggers CAPTCHAs, IP rate-limits, and account suspensions | **REJECT AUTOMATED DISPATCH**: Never automate outbound connection requests or DMs. Enforce user-assisted workflow: generate tailored drafts, provide 1-click copy, and provide direct `Open LinkedIn Profile` link. |
+| **`LinkedIn MCP Server` / `Linked API`** | Model Context Protocol / Node.js | Structured tools for LLM agent interaction | Requires active session cookies or API keys | **ADOPT AS DATA FORMAT**: Model our contact research and message draft interfaces to match standard MCP tool contracts for future agent extensibility. |
+| **Gmail-Based Connection Detection** | Gmail API parsing | 100% legal, non-invasive detection of accepted LinkedIn connections via official notification emails (`messages-noreply@linkedin.com`) | Only catches acceptances when email notifications are enabled by the user | **ADOPT (Primary Automated Source)**: Ingest LinkedIn acceptance emails via Gmail to automatically advance contact status to `ACCEPTED` and trigger follow-up drafting. |
 
-### Layer 3: Matching & Explainability Engine
+### Layer 6: Wellfound Job Discovery & Application Assistance
 
-| Candidate | Tech / Interface | Strengths | Weaknesses | Engineering Recommendation |
+| Candidate / Project | Tech / Interface | Strengths | Weaknesses | Engineering Recommendation |
 |---|---|---|---|---|
-| **`career-ops-hq/career-ops`** | Node.js / CLI | Explainable deterministic matching, criteria breakdown, cover letter prompts | CLI oriented | **ADAPT**: Adapt its multi-factor scoring (required vs preferred, eligibility boundaries). |
-| **Vector Embeddings (pgvector)** | PostgreSQL Extension | Semantic similarity across ambiguous job descriptions | Lacks clear explainability ("why did this match?"), non-deterministic | **HYBRID**: Maintain deterministic rule engine as primary gatekeeper; add semantic embeddings as an optional secondary reranker. |
-| **`AnshulDas007/Agentic-Job-Apply-Companion`** | Python / Pydantic | Safety-first fraud detection, strict qualification boundaries | Python-only | **ADAPT IN TYPESCRIPT**: Port the fraud filter heuristics and strict negative-eligibility gates into our TypeScript engine. |
+| **Wellfound Official Search & Public Pages** | HTTP / Browser | Publicly accessible startup listings, high accuracy on early-stage and seed/Series A equity roles | No public candidate write API | **ADOPT USER-ASSISTED WORKFLOW**: Ingest structured listing metadata, check eligibility against candidate profile, prepare application checklist, and execute clean browser handoff for human submission. |
+| **`wellfound_graphqlscout` / Unofficial GraphQL** | Reverse-engineered GraphQL | Extracts deep company and compensation data | Fragile; subject to breaking changes and Cloudflare anti-bot blocks | **USE AS FALLBACK / STUDY**: Leverage its GraphQL payload structures as reference for field mapping without violating platform terms. |
+| **Apify Wellfound Actor** | Cloud Scraping Actor | Managed proxy rotation, anti-bot bypass | Paid SaaS subscription; violates self-hosted offline principles | **REJECT**: Keep system self-contained on local machine without subscription dependencies. |
+
+### Layer 7: Daily Job-Search Summary & Briefing Engine
+
+| Candidate / Project | Tech / Interface | Strengths | Weaknesses | Engineering Recommendation |
+|---|---|---|---|---|
+| **Cron-driven Digest (`cron` / `node-cron`)** | Node.js timers | Scheduled generation at specific local time (8:00 PM IST / 14:30 UTC), low memory footprint | Node process timer can miss runs if offline | **ADOPT HYBRID**: In-process scheduler checking last run date in database, recovering missed runs upon server startup. |
+| **`JobHunterCat` / Daily Bot Digest** | Python / Telegram | Formats daily activity into high-signal action items ("Needs Attention" vs "No Action Needed") | Tied to Telegram bot | **ADAPT DIGEST TEMPLATE**: Port its Markdown digest structure into our Dashboard and optional self-directed Gmail digest. |
 
 ---
 
-## Recommendations for the Final Architecture
+## Final Integrated Architecture Plan
 
-Based on the evaluation, building a robust job application agent combines the best open-source components from the permissive repositories above:
+Based on the multi-layer research:
+1. **Gmail Subsystem**: Official Google OAuth 2.0 flow (`googleapis`), narrow read-only scope (`gmail.readonly`), AES-256 encrypted refresh tokens, incremental message synchronization, and 13-category rule-based email classifier with confidence metrics.
+2. **LinkedIn Networking Subsystem**: Relational CRM (`NetworkingContact`, `NetworkingMessage`) tracking the full connection lifecycle. Automatic transition to `ACCEPTED` upon parsing Gmail connection notifications. Automated drafting of concise ($\le 300$ char) connection notes and tailored referral follow-ups with explicit user review and zero automated spamming.
+3. **Wellfound & LinkedIn Workflows**: Normalization of startup and LinkedIn postings into unified `JobListing` pipeline. Multi-stage application preparation with eligibility evaluation and assisted browser handoff.
+4. **Daily Briefing**: Scheduled job generating an 8:00 PM IST digest combining Gmail events, application updates, and networking tasks into a prioritized dashboard view.
 
-1. **Job Ingestion Engine:** Direct official ATS JSON connectors (Greenhouse `boards-api.greenhouse.io`, Ashby `api.ashbyhq.com`, and Arbeitnow API) with exponential backoff and timeout guards.
-2. **Schema Standardization:** JSON Resume standard schema (`CandidateProfile`) mapped to PostgreSQL via Prisma.
-3. **Multi-Factor Explainable Matcher:** Deterministic rule engine evaluating required vs preferred skills, seniority disqualifiers, graduation cohort (2027/2028), and location preferences.
-4. **Data Security & HITL:** Local encrypted storage, strict `isApproved` human approval gate before any application action, and PostgreSQL audit logging.
-5. **Scheduler:** In-process concurrency-safe scheduler with observable run tracking (`SyncRun` table).
 

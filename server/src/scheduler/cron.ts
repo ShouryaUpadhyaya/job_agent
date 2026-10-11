@@ -51,7 +51,17 @@ export class ConnectorScheduler {
   }
 }
 
+import { dailyBriefingService } from '../briefing/summary';
+
 let activeScheduler: ConnectorScheduler | null = null;
+
+export function shouldRunDailyBriefingNow(now: Date = new Date(), targetHourIST: number = 20): boolean {
+  // IST is UTC + 5:30 (330 min)
+  const istOffsetMinutes = 330;
+  const istTimeMs = now.getTime() + (istOffsetMinutes * 60 * 1000);
+  const istDate = new Date(istTimeMs);
+  return istDate.getUTCHours() === targetHourIST;
+}
 
 export function initScheduler(intervalMinutes?: number): ConnectorScheduler {
   if (activeScheduler) {
@@ -63,8 +73,23 @@ export function initScheduler(intervalMinutes?: number): ConnectorScheduler {
 
   activeScheduler = new ConnectorScheduler(intervalMs, async () => {
     console.log('[Scheduler] Executing scheduled background sync...');
-    const result = await syncService.syncAll();
-    console.log(`[Scheduler] Sync finished: ${result.status} (Fetched: ${result.totalFetched}, New: ${result.totalNew}, Updated: ${result.totalUpdated})`);
+    try {
+      const result = await syncService.syncAll();
+      console.log(`[Scheduler] Sync finished: ${result.status} (Fetched: ${result.totalFetched}, New: ${result.totalNew}, Updated: ${result.totalUpdated})`);
+    } catch (err) {
+      console.error('[Scheduler] Sync error:', err);
+    }
+
+    // Daily briefing check (8:00 PM IST)
+    try {
+      if (shouldRunDailyBriefingNow()) {
+        console.log('[Scheduler] Triggering scheduled 8:00 PM IST Daily Job-Search Briefing...');
+        await dailyBriefingService.generateDailyBriefing();
+        console.log('[Scheduler] Daily briefing generated successfully.');
+      }
+    } catch (err) {
+      console.error('[Scheduler] Daily briefing error:', err);
+    }
   });
 
   activeScheduler.start();
@@ -79,3 +104,4 @@ export function shutdownScheduler() {
     console.log('[Scheduler] Background scheduler gracefully stopped.');
   }
 }
+

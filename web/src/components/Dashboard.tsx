@@ -5,6 +5,9 @@ import ApplicationCopilot from "./ApplicationCopilot";
 import ApplicationsPipeline from "./ApplicationsPipeline";
 import SourcesManager from "./SourcesManager";
 import ProfileManager from "./ProfileManager";
+import NetworkingCrm from "./NetworkingCrm";
+import GmailSync from "./GmailSync";
+import DailyBriefing from "./DailyBriefing";
 
 export type Job = {
   id: string;
@@ -25,9 +28,21 @@ export type Job = {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<"DISCOVERY" | "PIPELINE" | "SOURCES" | "PROFILE">("DISCOVERY");
+  const [activeTab, setActiveTab] = useState<
+    "DISCOVERY" | "PIPELINE" | "NETWORKING" | "GMAIL" | "BRIEFING" | "SOURCES" | "PROFILE"
+  >("DISCOVERY");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+
+  // Job Import Modal state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importSource, setImportSource] = useState<"wellfound" | "linkedin">("wellfound");
+  const [importUrl, setImportUrl] = useState("");
+  const [importTitle, setImportTitle] = useState("");
+  const [importCompany, setImportCompany] = useState("");
+  const [importDescription, setImportDescription] = useState("");
+  const [importLocation, setImportLocation] = useState("Remote");
+  const [importing, setImporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,6 +153,47 @@ export default function Dashboard() {
     }
   };
 
+  const handleImportJob = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setImporting(true);
+      const endpoint =
+        importSource === "wellfound"
+          ? `${API_BASE_URL}/api/jobs/import/wellfound`
+          : `${API_BASE_URL}/api/jobs/import/linkedin`;
+
+      const payload: any = {
+        url: importUrl,
+        title: importTitle,
+        company: importCompany,
+        description: importDescription,
+        location: importLocation,
+      };
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        setShowImportModal(false);
+        setImportUrl("");
+        setImportTitle("");
+        setImportCompany("");
+        setImportDescription("");
+        fetchJobs();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to import job");
+      }
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const filteredJobs = jobs.filter((job) => {
     const matchesFilter = filter === "ALL" || job.status === filter;
     const matchesSearch =
@@ -175,10 +231,10 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="flex space-x-1">
+        <div className="flex space-x-1 overflow-x-auto">
           <button
             onClick={() => setActiveTab("DISCOVERY")}
-            className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
               activeTab === "DISCOVERY"
                 ? "bg-indigo-600 text-white shadow-sm"
                 : "text-slate-300 hover:text-white hover:bg-slate-800"
@@ -188,7 +244,7 @@ export default function Dashboard() {
           </button>
           <button
             onClick={() => setActiveTab("PIPELINE")}
-            className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
               activeTab === "PIPELINE"
                 ? "bg-indigo-600 text-white shadow-sm"
                 : "text-slate-300 hover:text-white hover:bg-slate-800"
@@ -197,8 +253,38 @@ export default function Dashboard() {
             📋 Application Pipeline
           </button>
           <button
+            onClick={() => setActiveTab("NETWORKING")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === "NETWORKING"
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "text-slate-300 hover:text-white hover:bg-slate-800"
+            }`}
+          >
+            🤝 Networking CRM
+          </button>
+          <button
+            onClick={() => setActiveTab("GMAIL")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === "GMAIL"
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "text-slate-300 hover:text-white hover:bg-slate-800"
+            }`}
+          >
+            📬 Gmail Sync
+          </button>
+          <button
+            onClick={() => setActiveTab("BRIEFING")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === "BRIEFING"
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "text-slate-300 hover:text-white hover:bg-slate-800"
+            }`}
+          >
+            📰 Daily Briefing
+          </button>
+          <button
             onClick={() => setActiveTab("SOURCES")}
-            className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
               activeTab === "SOURCES"
                 ? "bg-indigo-600 text-white shadow-sm"
                 : "text-slate-300 hover:text-white hover:bg-slate-800"
@@ -208,7 +294,7 @@ export default function Dashboard() {
           </button>
           <button
             onClick={() => setActiveTab("PROFILE")}
-            className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
               activeTab === "PROFILE"
                 ? "bg-indigo-600 text-white shadow-sm"
                 : "text-slate-300 hover:text-white hover:bg-slate-800"
@@ -223,6 +309,24 @@ export default function Dashboard() {
       {activeTab === "PIPELINE" && (
         <div className="flex-1 overflow-y-auto p-8 max-w-7xl mx-auto w-full">
           <ApplicationsPipeline />
+        </div>
+      )}
+
+      {activeTab === "NETWORKING" && (
+        <div className="flex-1 overflow-y-auto p-8 max-w-7xl mx-auto w-full">
+          <NetworkingCrm />
+        </div>
+      )}
+
+      {activeTab === "GMAIL" && (
+        <div className="flex-1 overflow-y-auto p-8 max-w-7xl mx-auto w-full">
+          <GmailSync />
+        </div>
+      )}
+
+      {activeTab === "BRIEFING" && (
+        <div className="flex-1 overflow-y-auto p-8 max-w-7xl mx-auto w-full">
+          <DailyBriefing />
         </div>
       )}
 
@@ -245,18 +349,26 @@ export default function Dashboard() {
             <header className="p-6 border-b border-gray-200 sticky top-0 bg-white z-10 shadow-xs">
               <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-bold tracking-tight text-gray-900">Job Feed</h1>
-                <button
-                  onClick={handleManualSync}
-                  disabled={syncing}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center space-x-1.5 transition-all shadow-xs ${
-                    syncing
-                      ? "bg-blue-100 text-blue-500 cursor-wait"
-                      : "bg-blue-600 hover:bg-blue-700 text-white"
-                  }`}
-                >
-                  <span>{syncing ? "Syncing..." : "Sync Jobs"}</span>
-                  <span className={syncing ? "animate-spin" : ""}>🔄</span>
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setShowImportModal(true)}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center space-x-1 transition-all shadow-xs"
+                  >
+                    <span>+ Import</span>
+                  </button>
+                  <button
+                    onClick={handleManualSync}
+                    disabled={syncing}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center space-x-1.5 transition-all shadow-xs ${
+                      syncing
+                        ? "bg-blue-100 text-blue-500 cursor-wait"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                    }`}
+                  >
+                    <span>{syncing ? "Syncing..." : "Sync Jobs"}</span>
+                    <span className={syncing ? "animate-spin" : ""}>🔄</span>
+                  </button>
+                </div>
               </div>
 
               <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
@@ -565,6 +677,139 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Job Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-extrabold text-slate-900">
+                Import Job Opportunity
+              </h3>
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Import opportunities from Wellfound or LinkedIn. Job-Agent will compute match scores, extract skills, and generate application checklists.
+            </p>
+
+            <form onSubmit={handleImportJob} className="mt-4 space-y-3">
+              <div>
+                <label className="text-xs font-bold text-slate-700">Source Platform</label>
+                <div className="mt-1 flex space-x-3">
+                  <label className="flex items-center space-x-1.5 text-xs font-semibold cursor-pointer">
+                    <input
+                      type="radio"
+                      name="source"
+                      value="wellfound"
+                      checked={importSource === "wellfound"}
+                      onChange={() => setImportSource("wellfound")}
+                      className="text-indigo-600"
+                    />
+                    <span>🌱 Wellfound (Startups)</span>
+                  </label>
+                  <label className="flex items-center space-x-1.5 text-xs font-semibold cursor-pointer">
+                    <input
+                      type="radio"
+                      name="source"
+                      value="linkedin"
+                      checked={importSource === "linkedin"}
+                      onChange={() => setImportSource("linkedin")}
+                      className="text-indigo-600"
+                    />
+                    <span>💼 LinkedIn</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Job URL</label>
+                <input
+                  type="url"
+                  placeholder={
+                    importSource === "wellfound"
+                      ? "https://wellfound.com/jobs/..."
+                      : "https://www.linkedin.com/jobs/view/..."
+                  }
+                  value={importUrl}
+                  onChange={(e) => setImportUrl(e.target.value)}
+                  className="mt-1 w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Job Title</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Software Engineer Intern"
+                    value={importTitle}
+                    onChange={(e) => setImportTitle(e.target.value)}
+                    className="mt-1 w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Company Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Stripe, OpenAI"
+                    value={importCompany}
+                    onChange={(e) => setImportCompany(e.target.value)}
+                    className="mt-1 w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Location / Workplace</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Remote, Bangalore, San Francisco"
+                  value={importLocation}
+                  onChange={(e) => setImportLocation(e.target.value)}
+                  className="mt-1 w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Job Description / Requirements</label>
+                <textarea
+                  rows={4}
+                  placeholder="Paste job description text to compute fit score and match against your verified profile skills..."
+                  value={importDescription}
+                  onChange={(e) => setImportDescription(e.target.value)}
+                  className="mt-1 w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+              </div>
+
+              <div className="mt-4 flex justify-end space-x-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={importing}
+                  className="px-4 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
+                >
+                  {importing ? "Importing & Scoring..." : "Import Opportunity"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

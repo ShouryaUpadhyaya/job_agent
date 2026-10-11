@@ -12,6 +12,9 @@ import { applicationsRouter } from './api/applications';
 import { copilotRouter } from './api/copilot';
 import { syncRouter } from './api/sync';
 import sourcesRouter from './api/sources';
+import { gmailRouter } from './api/gmail';
+import { networkingRouter } from './api/networking';
+import { briefingRouter } from './api/briefing';
 
 const app = express();
 app.use(cors());
@@ -32,6 +35,9 @@ app.use('/api', profilesRouter);
 app.use('/api', applicationsRouter);
 app.use('/api', copilotRouter);
 app.use('/api', syncRouter);
+app.use('/api', gmailRouter);
+app.use('/api', networkingRouter);
+app.use('/api', briefingRouter);
 app.use('/api/sources', sourcesRouter);
 
 export { app, prisma };

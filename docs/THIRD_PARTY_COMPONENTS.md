@@ -90,6 +90,23 @@ This document maintains an accurate record of external open-source projects, API
   - Hardcoded HTTP 403 Forbidden rejection if `isApproved !== true`.
   - Guarantees automated agents cannot unilaterally submit job applications.
 
+### 2.6 Gmail Inbound Synchronization & Multi-Class Email Classification
+- **Origin / Source:** Google Gmail API v1 & OAuth 2.0 (`https://developers.google.com/gmail/api`)
+- **License / Terms:** Google APIs Terms of Service; read-only scope `https://www.googleapis.com/auth/gmail.readonly`.
+- **Implementation in Code:** `server/src/email/service.ts`, `server/src/email/classifier.ts`, `server/src/api/gmail.ts`
+- **Modifications / Enhancements:**
+  - Standardized OAuth2 flow storing refresh tokens in `ConnectedAccount` table.
+  - Multi-class heuristic classification engine recognizing interview invitations, HackerRank assessments, offers, rejections, and LinkedIn connection acceptances.
+  - Auto-correlates inbound events with `JobApplication` (advancing pipeline stage) and `NetworkingContact` (drafting referral requests).
+
+### 2.7 Wellfound & LinkedIn Normalizers and Application Checklists
+- **Origin / Source:** Startup ecosystem & LinkedIn job postings
+- **Implementation in Code:** `server/src/connectors/wellfound.ts`, `server/src/connectors/linkedin.ts`
+- **Modifications / Enhancements:**
+  - Extracts numeric job IDs and sanitizes descriptions.
+  - Distinguishes Easy Apply vs External ATS portals.
+  - Generates pre-application checklist for candidates prior to official browser handoff.
+
 ---
 
 ## 3. Libraries & Dependencies
@@ -105,4 +122,6 @@ This document maintains an accurate record of external open-source projects, API
 | `rss-parser` | `^3.13.0` | RSS/Atom feed parsing | MIT |
 | `pdf-parse` | `^2.4.5` | PDF text extraction | MIT |
 | `multer` | `^1.4.5-lts.1` | Multipart file upload handling | MIT |
+| `googleapis` | `^185.0.0` | Official Google APIs client (Gmail, OAuth2) | Apache-2.0 |
+| `google-auth-library` | `^11.2.0` | Google authentication & token management | Apache-2.0 |
 

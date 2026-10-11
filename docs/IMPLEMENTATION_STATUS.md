@@ -4,6 +4,23 @@ This board tracks the priority, status, test verification, and architecture deci
 
 ---
 
+## Sprint 4 — LinkedIn Referral CRM, Gmail OAuth Engine, Wellfound/LinkedIn Ingestion & 8:00 PM IST Daily Briefing (VERIFIED & COMPLETED)
+
+| ID | Description | Component | Status | Tests | Verification Summary |
+|---|---|---|---|---|---|
+| **S4-1** | Gmail OAuth & Multi-Class Email Classifier | `server/src/email/` | **DONE** | 9 integration tests | Google OAuth 2.0 flow via `googleapis`, `ConnectedAccount` persistence, comprehensive 12-class classifier (`INTERVIEW_INVITATION`, `ASSESSMENT`, `REJECTION`, `OFFER`, `LINKEDIN_CONNECTION_ACCEPTED`, `APPLICATION_CONFIRMATION`, etc.) with sender/company/role heuristics. |
+| **S4-2** | LinkedIn Acceptance & Pipeline Auto-Correlator | `server/src/email/service.ts` | **DONE** | Verified in tests | Correlates interview emails to `JobApplication` (advancing stage to `INTERVIEWING`/`OFFERED`), detects LinkedIn connection acceptance emails, updates contact to `ACCEPTED`, and auto-generates draft referral follow-up. |
+| **S4-3** | Networking Referral CRM & Persona Discovery | `server/src/networking/crm.ts` | **DONE** | 7 unit + API tests | `NetworkingContact` & `NetworkingMessage` models, lifecycle stages (`RESEARCHED` → `REQUEST_SENT` → `ACCEPTED` → `REFERRAL_REQUESTED` → `REFERRED`), ranked persona research prioritizing VIT Vellore alumni (98% fit), software engineers, and campus recruiters. |
+| **S4-4** | Strict 300-Char Connection Note & Referral Generator | `server/src/networking/crm.ts` | **DONE** | Unit tests | Strict LinkedIn <300 character constraint validation, customized outreach angles for VIT alumni, recruiters, and engineering managers, personalized referral asks referencing Shourya's verified skills (VIT '28, backend/distributed systems). |
+| **S4-5** | Wellfound & LinkedIn Job Ingestion & Checklist | `server/src/connectors/` | **DONE** | 5 integration tests | `normalizeWellfoundJob` for startup ecosystem jobs, `normalizeLinkedInJob` with numeric ID extraction, pre-application checklist generator identifying Easy Apply vs Direct Apply, and browser handoff routes (`POST /api/jobs/import/wellfound`, `POST /api/jobs/import/linkedin`, `GET /api/jobs/:id/checklist`). |
+| **S4-6** | Daily Job-Search Briefing & 8:00 PM IST Scheduler | `server/src/briefing/` & `cron.ts` | **DONE** | 3 integration tests | Daily executive digest aggregating urgent interviews, pending assessments, accepted connections, and top 3 recommended roles. Persisted in `DailyJobSearchSummary`. Scheduled at 8:00 PM IST (14:30 UTC). Endpoints: `/api/briefing/today`, `/api/briefing/generate`, `/api/briefing/history`. |
+| **S4-7** | Networking CRM Cockpit UI | `web/src/components/NetworkingCrm.tsx` | **DONE** | 3 component tests | Contacts table with stage badges, VIT alumni indicators, Auto-Discover Target Leads modal, copyable connection note modal (<300 chars), and referral follow-up generator. |
+| **S4-8** | Gmail Mailbox Sync & Simulator UI | `web/src/components/GmailSync.tsx` | **DONE** | 1 component test | Google account connection card, "Sync Inbox Now" action, interactive live email simulator for interviewer invitations and connection acceptances, classified event stream. |
+| **S4-9** | Daily Briefing Executive Cockpit UI | `web/src/components/DailyBriefing.tsx` | **DONE** | 1 component test | Executive overview cards, urgent "Needs Attention" alert highlight, formatted Markdown briefing, "Refresh Briefing Now" trigger, and historical briefing selector. |
+| **S4-10** | Unified 7-Tab Dashboard & Job Import Modal | `web/src/components/Dashboard.tsx` | **DONE** | 6 component tests | Top navigation expanded to 7 tabs (🎯 Job Discovery, 📋 Pipeline, 🤝 Networking CRM, 📬 Gmail Sync, 📰 Daily Briefing, 🏢 Target Companies, 👤 Profile & Resume) + inline "+ Import Job" modal for Wellfound and LinkedIn URLs. |
+
+---
+
 ## Sprint 3 — Resume Parser, ATS Tailoring, Multi-Source Manager & Pipeline (VERIFIED & COMPLETED)
 
 | ID | Description | Component | Status | Tests | Verification Summary |

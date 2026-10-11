@@ -31,6 +31,7 @@ model JobListing {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   applications JobApplication[]
+  networkingContacts NetworkingContact[]
 
   @@unique([externalId, source])
 }
@@ -64,6 +65,7 @@ model JobApplication {
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   documents          Document[]
+  emailEvents        EmailEvent[]
 }
 
 model Document {
@@ -102,7 +104,7 @@ model SyncRun {
 
 model JobSourceConfig {
   id           String    @id @default(uuid())
-  sourceType   String    // "greenhouse", "ashby", "lever", "arbeitnow"
+  sourceType   String    // "greenhouse", "ashby", "lever", "arbeitnow", "wellfound", "linkedin"
   name         String    // e.g. "Cloudflare", "Linear", "Spotify", "Netflix"
   boardToken   String    // e.g. "cloudflare", "linear", "spotify", "netflix"
   enabled      Boolean   @default(true)
@@ -113,5 +115,100 @@ model JobSourceConfig {
 
   @@unique([sourceType, boardToken])
 }
+
+model ConnectedAccount {
+  id           String    @id @default(uuid())
+  provider     String    // "gmail", "linkedin"
+  email        String?
+  accessToken  String?
+  refreshToken String?
+  tokenExpiry  DateTime?
+  scopes       String[]
+  status       String    @default("CONNECTED") // "CONNECTED", "DISCONNECTED", "EXPIRED", "REVOKED"
+  lastSyncedAt DateTime?
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([provider, email])
+}
+
+model NetworkingContact {
+  id              String   @id @default(uuid())
+  name            String
+  company         String
+  role            String
+  profileUrl      String
+  headline        String?
+  team            String?
+  vitAlumni       Boolean  @default(false)
+  outreachAngle   String?
+  relevanceScore  Int      @default(0)
+  targetJobId     String?
+  targetJob       JobListing? @relation(fields: [targetJobId], references: [id])
+  status          String   @default("RESEARCHED") // "RESEARCHED", "READY_TO_CONNECT", "REQUEST_SENT", "ACCEPTED", "MESSAGE_DRAFTED", "MESSAGE_SENT", "REPLIED", "REFERRAL_REQUESTED", "REFERRED", "NOT_INTERESTED", "FOLLOW_UP_DUE"
+  notes           String?
+  requestSentAt   DateTime?
+  acceptedAt      DateTime?
+  lastContactAt   DateTime?
+  nextFollowUpAt  DateTime?
+  verified        Boolean  @default(true)
+  messages        NetworkingMessage[]
+  emailEvents     EmailEvent[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model NetworkingMessage {
+  id          String   @id @default(uuid())
+  contactId   String
+  contact     NetworkingContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  type        String   // "CONNECTION_REQUEST", "REFERRAL_FOLLOWUP", "FOLLOWUP_REMINDER"
+  content     String
+  status      String   @default("DRAFT") // "DRAFT", "APPROVED", "SENT"
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model EmailEvent {
+  id                  String   @id @default(uuid())
+  messageId           String   @unique
+  threadId            String?
+  sender              String
+  senderName          String?
+  subject             String
+  snippet             String?
+  receivedAt          DateTime
+  classification      String   // APPLICATION_CONFIRMATION, INTERVIEW_INVITATION, ASSESSMENT, REJECTION, OFFER, RECRUITER_OUTREACH, REFERRAL_RESPONSE, LINKEDIN_CONNECTION_ACCEPTED, FOLLOW_UP_REQUIRED, JOB_ALERT, UNRELATED, UNKNOWN
+  confidence          Float    @default(0.0)
+  explanation         String?
+  suggestedAction     String?
+  company             String?
+  role                String?
+  jobApplicationId    String?
+  jobApplication      JobApplication? @relation(fields: [jobApplicationId], references: [id])
+  networkingContactId String?
+  networkingContact   NetworkingContact? @relation(fields: [networkingContactId], references: [id])
+  isProcessed         Boolean  @default(false)
+  createdAt           DateTime @default(now())
+}
+
+model DailyJobSearchSummary {
+  id                       String   @id @default(uuid())
+  summaryDate              DateTime // e.g. midnight UTC of the date
+  timezone                 String   @default("Asia/Kolkata")
+  content                  String
+  newApplicationsCount     Int      @default(0)
+  interviewsCount          Int      @default(0)
+  rejectionsCount          Int      @default(0)
+  acceptedConnectionsCount Int      @default(0)
+  needsAttentionCount      Int      @default(0)
+  deliveryStatus           String   @default("GENERATED") // "GENERATED", "EMAILED"
+  generatedAt              DateTime @default(now())
+
+  @@unique([summaryDate])
+}
+
 
 

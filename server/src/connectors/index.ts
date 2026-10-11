@@ -6,3 +6,5 @@ export * from './lever';
 export * from './arbeitnow';
 export * from './jsonApi';
 export * from './rss';
+export * from './wellfound';
+export * from './linkedin';

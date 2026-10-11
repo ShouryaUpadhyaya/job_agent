@@ -64,3 +64,83 @@ jobsRouter.get('/jobs/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch job' });
   }
 });
+
+// Import Wellfound job listing
+jobsRouter.post('/jobs/import/wellfound', async (req, res) => {
+  try {
+    const { normalizeWellfoundJob } = await import('../connectors/wellfound');
+    const { processAndUpsertJob } = await import('../jobs/normalization');
+
+    const { url, title, company, description, location, salary, equity, stage, tags } = req.body;
+    if (!url || !title || !company || !description) {
+      return res.status(400).json({ error: 'url, title, company, and description are required' });
+    }
+
+    const raw = normalizeWellfoundJob({ url, title, company, description, location, salary, equity, stage, tags });
+    const profile = await prisma.candidateProfile.findFirst();
+    const result = await processAndUpsertJob(raw, profile);
+
+    res.status(result.isNew ? 201 : 200).json({
+      message: result.isNew ? 'Job imported successfully' : 'Job listing updated',
+      job: result.listing,
+      isNew: result.isNew,
+    });
+  } catch (error: any) {
+    console.error('Error importing Wellfound job:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Import LinkedIn job listing
+jobsRouter.post('/jobs/import/linkedin', async (req, res) => {
+  try {
+    const { normalizeLinkedInJob } = await import('../connectors/linkedin');
+    const { processAndUpsertJob } = await import('../jobs/normalization');
+
+    const { url, title, company, description, location, isEasyApply, workplaceType, tags } = req.body;
+    if (!url || !title || !company || !description) {
+      return res.status(400).json({ error: 'url, title, company, and description are required' });
+    }
+
+    const raw = normalizeLinkedInJob({ url, title, company, description, location, isEasyApply, workplaceType, tags });
+    const profile = await prisma.candidateProfile.findFirst();
+    const result = await processAndUpsertJob(raw, profile);
+
+    res.status(result.isNew ? 201 : 200).json({
+      message: result.isNew ? 'Job imported successfully' : 'Job listing updated',
+      job: result.listing,
+      isNew: result.isNew,
+    });
+  } catch (error: any) {
+    console.error('Error importing LinkedIn job:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get pre-application checklist for a job
+jobsRouter.get('/jobs/:id/checklist', async (req, res) => {
+  try {
+    const { generatePreApplicationChecklist } = await import('../connectors/linkedin');
+
+    const job = await prisma.jobListing.findUnique({
+      where: { id: req.params.id },
+    });
+
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    const checklist = generatePreApplicationChecklist({
+      title: job.title,
+      company: job.company,
+      url: job.url,
+      tags: job.matchedSkills,
+    });
+
+    res.json({ job, checklist });
+  } catch (error: any) {
+    console.error('Error generating checklist:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
