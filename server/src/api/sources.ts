@@ -28,7 +28,7 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'sourceType and name are required' });
     }
 
-    const validTypes = ['greenhouse', 'ashby', 'lever', 'arbeitnow'];
+    const validTypes = ['greenhouse', 'ashby', 'lever', 'arbeitnow', 'linkedin', 'wellfound'];
     if (!validTypes.includes(sourceType.toLowerCase())) {
       return res.status(400).json({
         error: `Invalid sourceType '${sourceType}'. Allowed types: ${validTypes.join(', ')}`,

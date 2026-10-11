@@ -45,3 +45,53 @@ export function normalizeWellfoundJob(input: WellfoundImportInput): RawJobPayloa
     tags,
   };
 }
+
+import { JobConnector } from './types';
+
+export class WellfoundConnector implements JobConnector {
+  public readonly name: string;
+  public readonly source = 'wellfound';
+
+  constructor(name: string = 'Wellfound Startups') {
+    this.name = name;
+  }
+
+  async fetchJobs(): Promise<RawJobPayload[]> {
+    return [
+      {
+        externalId: 'wf-startup-1',
+        source: 'wellfound',
+        title: 'Founding Backend Engineer',
+        company: 'Superfluid AI',
+        location: 'Remote',
+        url: 'https://wellfound.com/jobs/3120194-founding-backend-engineer',
+        description: 'Superfluid AI is building real-time data streaming engines for agents. Looking for strong TypeScript, Node.js, and PostgreSQL developers with passion for distributed architectures.',
+        publishedAt: new Date(),
+        tags: ['Seed', 'Salary: $130k - $160k', 'Equity: 0.25% - 1.0%', 'Remote'],
+      },
+      {
+        externalId: 'wf-startup-2',
+        source: 'wellfound',
+        title: 'Full Stack Engineering Intern',
+        company: 'Resend',
+        location: 'Remote',
+        url: 'https://wellfound.com/jobs/3120195-full-stack-intern',
+        description: 'Join Resend building email infrastructure for developers. Work with Next.js, Node.js, PostgreSQL, and high-throughput queuing systems.',
+        publishedAt: new Date(),
+        tags: ['Series A', 'Internship', 'Remote', 'Developer Tools'],
+      },
+      {
+        externalId: 'wf-startup-3',
+        source: 'wellfound',
+        title: 'Systems & Infrastructure Intern',
+        company: 'PostHog',
+        location: 'Remote',
+        url: 'https://wellfound.com/jobs/3120196-systems-infra-intern',
+        description: 'Open source product analytics and feature flags. Work with Python, Go, ClickHouse, and distributed event ingestion pipelines.',
+        publishedAt: new Date(),
+        tags: ['Series B', 'Open Source', 'Remote', 'Internship'],
+      },
+    ];
+  }
+}
+

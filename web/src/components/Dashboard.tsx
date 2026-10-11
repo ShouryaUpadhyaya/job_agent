@@ -49,6 +49,7 @@ export default function Dashboard() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [pipelineMessage, setPipelineMessage] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("ALL");
+  const [sourceFilter, setSourceFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [showCopilot, setShowCopilot] = useState(false);
 
@@ -196,12 +197,15 @@ export default function Dashboard() {
 
   const filteredJobs = jobs.filter((job) => {
     const matchesFilter = filter === "ALL" || job.status === filter;
+    const matchesSource =
+      sourceFilter === "ALL" ||
+      (job.source && job.source.toLowerCase() === sourceFilter.toLowerCase());
     const matchesSearch =
       searchQuery === "" ||
       job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       job.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (job.location && job.location.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesFilter && matchesSearch;
+    return matchesFilter && matchesSource && matchesSearch;
   });
 
   const getStatusBadge = (status?: string) => {
@@ -215,6 +219,16 @@ export default function Dashboard() {
       default:
         return "bg-blue-100 text-blue-800 border-blue-300";
     }
+  };
+
+  const getSourceBadge = (source?: string) => {
+    const s = (source || "").toLowerCase();
+    if (s.includes("linkedin")) return "bg-blue-50 text-blue-700 border-blue-200";
+    if (s.includes("wellfound")) return "bg-emerald-50 text-emerald-700 border-emerald-200";
+    if (s.includes("greenhouse")) return "bg-teal-50 text-teal-700 border-teal-200";
+    if (s.includes("ashby")) return "bg-purple-50 text-purple-700 border-purple-200";
+    if (s.includes("lever")) return "bg-amber-50 text-amber-700 border-amber-200";
+    return "bg-slate-50 text-slate-600 border-slate-200";
   };
 
   return (
@@ -393,21 +407,37 @@ export default function Dashboard() {
                 />
               </div>
 
-              {/* Category Tabs */}
-              <div className="flex space-x-1.5 mt-3 pt-2 border-t border-gray-100">
-                {["ALL", "APPLY", "REVIEW", "SKIP"].map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setFilter(f)}
-                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                      filter === f
-                        ? "bg-gray-900 text-white shadow-xs"
-                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                    }`}
-                  >
-                    {f}
-                  </button>
-                ))}
+              {/* Category Tabs & Source Filter */}
+              <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100 gap-2">
+                <div className="flex space-x-1">
+                  {["ALL", "APPLY", "REVIEW", "SKIP"].map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setFilter(f)}
+                      className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                        filter === f
+                          ? "bg-gray-900 text-white shadow-xs"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+
+                <select
+                  value={sourceFilter}
+                  onChange={(e) => setSourceFilter(e.target.value)}
+                  className="px-2 py-1 text-[11px] font-bold rounded-md border border-gray-200 bg-gray-50 text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="ALL">All Sources</option>
+                  <option value="linkedin">💼 LinkedIn</option>
+                  <option value="wellfound">🌱 Wellfound</option>
+                  <option value="greenhouse">Greenhouse</option>
+                  <option value="ashby">Ashby</option>
+                  <option value="lever">Lever</option>
+                  <option value="arbeitnow">Arbeitnow</option>
+                </select>
               </div>
             </header>
 
@@ -491,8 +521,12 @@ export default function Dashboard() {
                         <span className="font-bold text-blue-700">
                           Match: {job.score ?? 0} pts
                         </span>
-                        <span className="text-gray-400 text-[11px] font-mono">
-                          {job.source || "Direct"}
+                        <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md border ${getSourceBadge(job.source)}`}>
+                          {job.source?.toLowerCase() === "linkedin"
+                            ? "💼 LinkedIn"
+                            : job.source?.toLowerCase() === "wellfound"
+                            ? "🌱 Wellfound"
+                            : job.source || "Direct"}
                         </span>
                       </div>
                     </button>

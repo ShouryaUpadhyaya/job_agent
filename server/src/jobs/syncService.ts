@@ -4,6 +4,8 @@ import { GreenhouseConnector } from '../connectors/greenhouse';
 import { AshbyConnector } from '../connectors/ashby';
 import { LeverConnector } from '../connectors/lever';
 import { ArbeitnowConnector } from '../connectors/arbeitnow';
+import { LinkedInConnector } from '../connectors/linkedin';
+import { WellfoundConnector } from '../connectors/wellfound';
 import { processAndUpsertJob } from './normalization';
 
 export interface SyncSummary {
@@ -33,6 +35,8 @@ export class SyncService {
       new AshbyConnector('linear', 'Linear'),
       new LeverConnector('spotify', 'Spotify'),
       new ArbeitnowConnector(),
+      new LinkedInConnector('Software Engineer Intern', 'India', 'LinkedIn Jobs'),
+      new WellfoundConnector('Wellfound Startups'),
     ];
   }
 
@@ -64,6 +68,10 @@ export class SyncService {
         return new LeverConnector(config.boardToken, config.name);
       case 'arbeitnow':
         return new ArbeitnowConnector();
+      case 'linkedin':
+        return new LinkedInConnector(config.boardToken || 'Software Engineer Intern', 'India', config.name || 'LinkedIn Jobs');
+      case 'wellfound':
+        return new WellfoundConnector(config.name || 'Wellfound Startups');
       default:
         return null;
     }
@@ -77,6 +85,8 @@ export class SyncService {
         { sourceType: 'ashby', boardToken: 'linear', name: 'Linear' },
         { sourceType: 'lever', boardToken: 'spotify', name: 'Spotify' },
         { sourceType: 'arbeitnow', boardToken: 'global', name: 'Arbeitnow Tech' },
+        { sourceType: 'linkedin', boardToken: 'software-engineer-intern', name: 'LinkedIn Jobs' },
+        { sourceType: 'wellfound', boardToken: 'startups', name: 'Wellfound Startups' },
       ];
       for (const cfg of defaultConfigs) {
         await prisma.jobSourceConfig.upsert({
