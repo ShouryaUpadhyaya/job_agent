@@ -21,8 +21,13 @@ model JobListing {
   company     String
   url         String
   description String
+  location    String?
   status      String   @default("NEW")
   score       Int      @default(0)
+  matchReasons String[]
+  matchedSkills String[]
+  missingSkills String[]
+  retrievedAt DateTime @default(now())
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   applications JobApplication[]
@@ -74,3 +79,17 @@ model AuditLog {
   timestamp DateTime @default(now())
   metadata  Json?
 }
+
+model SyncRun {
+  id            String    @id @default(uuid())
+  source        String
+  status        String    // "RUNNING", "SUCCESS", "FAILED", "PARTIAL"
+  fetchedCount  Int       @default(0)
+  newCount      Int       @default(0)
+  updatedCount  Int       @default(0)
+  errorMessage  String?
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+  durationMs    Int?
+}
+

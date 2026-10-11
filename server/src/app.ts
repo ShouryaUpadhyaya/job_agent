@@ -1,20 +1,20 @@
 import express from 'express';
 import cors from 'cors';
-import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 import path from 'path';
+
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+
+import { prisma } from './db';
 import { jobsRouter } from './api/jobs';
 import { profilesRouter } from './api/profiles';
 import { applicationsRouter } from './api/applications';
-
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
-import { copilotRouter } from "./api/copilot";
+import { copilotRouter } from './api/copilot';
+import { syncRouter } from './api/sync';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-import { prisma } from './db';
 
 app.get('/health', async (req, res) => {
   try {
@@ -29,7 +29,7 @@ app.get('/health', async (req, res) => {
 app.use('/api', jobsRouter);
 app.use('/api', profilesRouter);
 app.use('/api', applicationsRouter);
-
-app.use("/api", copilotRouter);
+app.use('/api', copilotRouter);
+app.use('/api', syncRouter);
 
 export { app, prisma };

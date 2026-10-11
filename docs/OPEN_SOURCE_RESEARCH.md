@@ -77,15 +77,47 @@ During research, several other well-maintained community projects were identifie
 2. **[AkbarDevop/ai-job-agent](https://github.com/AkbarDevop/ai-job-agent)**: Tailored for Claude Code, specific integrations for Greenhouse, Jobvite, Lever, and Ashby.
 3. **[career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops)**: A local CLI agent that does CV-to-job matching, scoring, and cover letter generation.
 4. **[hlan98/JobHunterCat](https://github.com/hlan98/JobHunterCat)**: Features multi-resume support, smart scoring, and Telegram integration for notifications.
+5. **[adgramigna/job-board-scraper](https://github.com/adgramigna/job-board-scraper)**: Open-source multi-ATS scraper supporting Greenhouse, Lever, Ashby, and Rippling with normalized JSON outputs.
+6. **[rishilahoti/ashby-job-scraper](https://github.com/rishilahoti/ashby-job-scraper)**: Production-grade scraper targeting Ashby's public API endpoints, persisting state into PostgreSQL.
+7. **[xitanggg/open-resume](https://github.com/xitanggg/open-resume)**: Modern open-source TypeScript & Next.js resume parser and builder supporting structured client-side PDF parsing and validation.
+
+---
+
+## Comparative Evaluation of Architectural Alternatives
+
+### Layer 1: Job Discovery & ATS Ingestion
+
+| Candidate | Tech / Interface | Strengths | Weaknesses | Engineering Recommendation |
+|---|---|---|---|---|
+| **Direct ATS API Endpoints** (Greenhouse, Ashby, Lever, Arbeitnow) | HTTP / JSON | Direct, official, zero HTML parsing fragility, high-speed, zero anti-bot issues | Requires knowing company board tokens | **ADOPT (Primary)**: Directly use official public ATS JSON endpoints for 100% reliable data extraction without DOM brittleness. |
+| **`adgramigna/job-board-scraper`** | Python / GitHub Actions | Multi-ATS support, handles pagination and normalization | Designed as standalone batch script, not an embedded library | **ADAPT PATTERNS**: Adopt its field normalization, error classification, and retry strategies. |
+| **`Apify Multi-ATS Actor`** | Hosted Apify / JS | Managed proxy rotation, anti-bot handling | Requires third-party cloud account and subscription | **REJECT FOR SELF-HOSTED**: Self-hosted Linux system should not depend on paid cloud scrapers when public endpoints are open. |
+
+### Layer 2: Resume Ingestion & Profile Taxonomy
+
+| Candidate | Tech / Interface | Strengths | Weaknesses | Engineering Recommendation |
+|---|---|---|---|---|
+| **JSON Resume Standard** (`jsonresume.org`) | Standard JSON Schema | Universal schema, supported across dozens of tools, handles education, skills, projects | Schema specification only, not a parser | **ADOPT (Schema)**: Standardize our internal candidate profile around the JSON Resume standard. |
+| **`xitanggg/open-resume`** | TypeScript / React / Next.js | Native TypeScript, runs in-process, handles PDF parsing without heavy Python service | Tied to React UI components | **ADAPT**: Reuse TypeScript type definitions and structured validation rules. |
+| **`pyresparser` / `spaCy`** | Python / NLP | Deep NLP entity extraction from raw text | Requires heavy Python runtime and spaCy model downloads (several hundred MBs) | **DEFER**: Unnecessary operational overhead for initial TypeScript monorepo when structured profile ingestion is already deterministic. |
+
+### Layer 3: Matching & Explainability Engine
+
+| Candidate | Tech / Interface | Strengths | Weaknesses | Engineering Recommendation |
+|---|---|---|---|---|
+| **`career-ops-hq/career-ops`** | Node.js / CLI | Explainable deterministic matching, criteria breakdown, cover letter prompts | CLI oriented | **ADAPT**: Adapt its multi-factor scoring (required vs preferred, eligibility boundaries). |
+| **Vector Embeddings (pgvector)** | PostgreSQL Extension | Semantic similarity across ambiguous job descriptions | Lacks clear explainability ("why did this match?"), non-deterministic | **HYBRID**: Maintain deterministic rule engine as primary gatekeeper; add semantic embeddings as an optional secondary reranker. |
+| **`AnshulDas007/Agentic-Job-Apply-Companion`** | Python / Pydantic | Safety-first fraud detection, strict qualification boundaries | Python-only | **ADAPT IN TYPESCRIPT**: Port the fraud filter heuristics and strict negative-eligibility gates into our TypeScript engine. |
 
 ---
 
 ## Recommendations for the Final Architecture
 
-Based on the evaluation, building a robust job application agent should combine the best open-source components from the MIT-licensed/permissive repositories above:
+Based on the evaluation, building a robust job application agent combines the best open-source components from the permissive repositories above:
 
-1. **Core Navigation Engine:** Use `browser-use` (as seen in `job-agent`) to handle fragile UI interactions, rather than hard-coding Playwright locators. This makes the agent resilient to UI updates on job boards.
-2. **State & Workflow Management:** Adopt a `LangGraph` approach (from `job-application-agent`) to handle state transitions, retries, and crash-recovery (idempotency).
-3. **Data Schema & Fraud Prevention:** Utilize the Pydantic-based schemas and fraud detection rules from `Agentic-Job-Apply-Companion` to ensure structured data and protect users from fake postings.
-4. **Data Security:** Implement local encrypted storage (like `job-application-agent`) for sensitive credentials and profile data, coupled with manual credential entry or human-in-the-loop pauses (like `job-agent` and `Agentic-Job-Apply-Companion`) to handle MFA/CAPTCHAs securely.
-5. **Notifications:** If a background daemon is desired, incorporate something like Telegram/Slack notifications inspired by `JobHunterCat`.
+1. **Job Ingestion Engine:** Direct official ATS JSON connectors (Greenhouse `boards-api.greenhouse.io`, Ashby `api.ashbyhq.com`, and Arbeitnow API) with exponential backoff and timeout guards.
+2. **Schema Standardization:** JSON Resume standard schema (`CandidateProfile`) mapped to PostgreSQL via Prisma.
+3. **Multi-Factor Explainable Matcher:** Deterministic rule engine evaluating required vs preferred skills, seniority disqualifiers, graduation cohort (2027/2028), and location preferences.
+4. **Data Security & HITL:** Local encrypted storage, strict `isApproved` human approval gate before any application action, and PostgreSQL audit logging.
+5. **Scheduler:** In-process concurrency-safe scheduler with observable run tracking (`SyncRun` table).
+

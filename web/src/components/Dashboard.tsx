@@ -9,85 +9,152 @@ export type Job = {
   company: string;
   location?: string;
   source?: string;
-  url?: string;
+  url: string;
   description: string;
   score?: number;
   status?: string;
+  matchReasons?: string[];
+  matchedSkills?: string[];
+  missingSkills?: string[];
+  retrievedAt?: string;
 };
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 export default function Dashboard() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("ALL");
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const [showCopilot, setShowCopilot] = useState(false);
 
-  useEffect(() => {
-    const fetchJobs = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await fetch("http://localhost:3001/api/jobs");
-        if (!res.ok) {
-          throw new Error("Failed to fetch jobs");
-        }
-        const data = await res.json();
-        setJobs(data);
-      } catch (err) {
-        if (err instanceof Error) {
-          setError(err.message);
-        } else {
-          setError("An error occurred");
-        }
-      } finally {
-        setLoading(false);
+  const fetchJobs = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetch(`${API_BASE_URL}/api/jobs?sortBy=score&sortOrder=desc`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch jobs");
       }
-    };
+      const data = await res.json();
+      setJobs(data);
+    } catch (err) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("An error occurred");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchJobs();
   }, []);
 
+  const handleManualSync = async () => {
+    try {
+      setSyncing(true);
+      setSyncMessage(null);
+      const res = await fetch(`${API_BASE_URL}/api/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSyncMessage(`Sync complete: ${data.summary?.totalNew || 0} new, ${data.summary?.totalUpdated || 0} updated`);
+        await fetchJobs();
+      } else {
+        setSyncMessage(`Sync status: ${data.message || "Failed"}`);
+      }
+    } catch (err: any) {
+      setSyncMessage(`Sync failed: ${err.message || "Network error"}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const filteredJobs = jobs.filter((job) => {
-    if (filter === "ALL") return true;
-    return job.status === filter;
+    const matchesFilter = filter === "ALL" || job.status === filter;
+    const matchesSearch =
+      searchQuery === "" ||
+      job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      job.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (job.location && job.location.toLowerCase().includes(searchQuery.toLowerCase()));
+    return matchesFilter && matchesSearch;
   });
 
   const getStatusBadge = (status?: string) => {
     switch (status) {
       case "APPLY":
-        return "bg-emerald-100 text-emerald-800 border-emerald-200";
+        return "bg-emerald-100 text-emerald-800 border-emerald-300";
       case "REVIEW":
-        return "bg-amber-100 text-amber-800 border-amber-200";
+        return "bg-amber-100 text-amber-800 border-amber-300";
       case "SKIP":
-        return "bg-gray-100 text-gray-600 border-gray-200";
+        return "bg-gray-100 text-gray-600 border-gray-300";
       default:
-        return "bg-blue-100 text-blue-800 border-blue-200";
+        return "bg-blue-100 text-blue-800 border-blue-300";
     }
   };
 
   return (
     <div className="flex h-screen bg-gray-50 text-gray-900 font-sans">
-      {/* Left Sidebar: Job Feed */}
+      {/* Left Column: Job Feed & Filters */}
       <div className="w-1/3 border-r border-gray-200 bg-white overflow-y-auto flex flex-col">
-        <header className="p-6 border-b border-gray-200 sticky top-0 bg-white z-10 shadow-sm">
+        <header className="p-6 border-b border-gray-200 sticky top-0 bg-white z-10 shadow-xs">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">Job Feed</h1>
-            <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-              Shourya (VIT '28)
-            </span>
+            <button
+              onClick={handleManualSync}
+              disabled={syncing}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center space-x-1.5 transition-all shadow-xs ${
+                syncing
+                  ? "bg-blue-100 text-blue-500 cursor-wait"
+                  : "bg-blue-600 hover:bg-blue-700 text-white"
+              }`}
+            >
+              <span>{syncing ? "Syncing..." : "Sync Jobs"}</span>
+              <span className={syncing ? "animate-spin" : ""}>🔄</span>
+            </button>
           </div>
-          <p className="text-sm text-gray-500 mt-1">Autonomous Multi-Agent Matcher</p>
 
-          {/* Filter Bar */}
-          <div className="flex space-x-2 mt-4 pt-2 border-t border-gray-100">
+          <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+            <p>Target: 2027 Internships (VIT '28)</p>
+            <span className="font-semibold text-gray-700">{jobs.length} total listings</span>
+          </div>
+
+          {syncMessage && (
+            <div className="mt-2 p-2 text-xs bg-blue-50 text-blue-700 rounded-md border border-blue-200">
+              {syncMessage}
+            </div>
+          )}
+
+          {/* Search Box */}
+          <div className="mt-3">
+            <input
+              type="text"
+              placeholder="Search title, company, or tech..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Category Tabs */}
+          <div className="flex space-x-1.5 mt-3 pt-2 border-t border-gray-100">
             {["ALL", "APPLY", "REVIEW", "SKIP"].map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
                 className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
                   filter === f
-                    ? "bg-blue-600 text-white shadow-sm"
+                    ? "bg-gray-900 text-white shadow-xs"
                     : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                 }`}
               >
@@ -113,7 +180,7 @@ export default function Dashboard() {
             </div>
             <p className="text-red-600 font-medium">{error}</p>
             <button
-              onClick={() => window.location.reload()}
+              onClick={() => fetchJobs()}
               className="mt-4 px-4 py-2 bg-red-50 text-red-600 rounded-md text-sm font-medium hover:bg-red-100 transition-colors"
             >
               Try again
@@ -129,6 +196,12 @@ export default function Dashboard() {
               </svg>
             </div>
             <p className="text-gray-500">No jobs available right now.</p>
+            <button
+              onClick={handleManualSync}
+              className="mt-3 px-4 py-2 text-xs font-semibold bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Run Ingestion Sync
+            </button>
           </div>
         )}
 
@@ -141,7 +214,7 @@ export default function Dashboard() {
                     setSelectedJob(job);
                     setShowCopilot(false);
                   }}
-                  className={`w-full text-left p-6 transition-colors hover:bg-blue-50 focus:outline-none ${
+                  className={`w-full text-left p-5 transition-colors hover:bg-blue-50/60 focus:outline-none ${
                     selectedJob?.id === job.id
                       ? "bg-blue-50 border-l-4 border-blue-600"
                       : "border-l-4 border-transparent"
@@ -149,10 +222,10 @@ export default function Dashboard() {
                   data-testid={`job-item-${job.id}`}
                 >
                   <div className="flex items-start justify-between">
-                    <h3 className="font-semibold text-lg text-gray-900 leading-tight">{job.title}</h3>
+                    <h3 className="font-semibold text-base text-gray-900 leading-snug">{job.title}</h3>
                     {job.status && (
                       <span
-                        className={`ml-2 px-2.5 py-0.5 text-xs font-bold rounded-full border ${getStatusBadge(
+                        className={`ml-2 px-2 py-0.5 text-xs font-bold rounded-full border whitespace-nowrap ${getStatusBadge(
                           job.status
                         )}`}
                       >
@@ -160,16 +233,19 @@ export default function Dashboard() {
                       </span>
                     )}
                   </div>
-                  <div className="mt-2 flex items-center text-sm text-gray-500 space-x-2">
+                  <div className="mt-1.5 flex items-center text-xs text-gray-500 space-x-2">
                     <span className="font-medium text-gray-700">{job.company}</span>
                     <span>&bull;</span>
-                    <span>{job.location || job.source || "India / Remote"}</span>
+                    <span>{job.location || job.source || "Remote"}</span>
                   </div>
-                  {job.score !== undefined && (
-                    <div className="mt-2 text-xs font-semibold text-blue-600">
-                      Match Score: {job.score} pts
-                    </div>
-                  )}
+                  <div className="mt-2 flex items-center justify-between text-xs">
+                    <span className="font-bold text-blue-700">
+                      Match: {job.score ?? 0} pts
+                    </span>
+                    <span className="text-gray-400 text-[11px] font-mono">
+                      {job.source || "Direct"}
+                    </span>
+                  </div>
                 </button>
               </li>
             ))}
@@ -177,68 +253,100 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Right Side: Detail & Copilot */}
+      {/* Right Column: Job Details & Match Explanations */}
       <div className="w-2/3 bg-gray-50 overflow-y-auto">
         {selectedJob ? (
-          <div className="max-w-3xl mx-auto p-12" data-testid="job-details">
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-              <div className="flex items-start justify-between">
+          <div className="max-w-3xl mx-auto p-10" data-testid="job-details">
+            <div className="bg-white rounded-2xl shadow-xs border border-gray-200 p-8">
+              {/* Header */}
+              <div className="flex items-start justify-between border-b border-gray-100 pb-6">
                 <div>
-                  <h2 className="text-3xl font-bold text-gray-900">{selectedJob.title}</h2>
-                  <div className="mt-2 flex items-center text-lg text-gray-600 space-x-3">
+                  <h2 className="text-2xl font-bold text-gray-900 leading-tight">{selectedJob.title}</h2>
+                  <div className="mt-2 flex items-center text-base text-gray-600 space-x-3">
                     <span className="font-semibold text-gray-900">{selectedJob.company}</span>
                     <span>&mdash;</span>
-                    <span>{selectedJob.location || selectedJob.source || "India / Remote"}</span>
+                    <span>{selectedJob.location || "Remote"}</span>
                   </div>
                 </div>
                 {selectedJob.status && (
-                  <span
-                    className={`px-3 py-1 text-sm font-bold rounded-full border ${getStatusBadge(
-                      selectedJob.status
-                    )}`}
-                  >
-                    {selectedJob.status} ({selectedJob.score ?? 0} pts)
-                  </span>
+                  <div className="text-right">
+                    <span
+                      className={`inline-block px-3 py-1 text-sm font-bold rounded-full border ${getStatusBadge(
+                        selectedJob.status
+                      )}`}
+                    >
+                      {selectedJob.status} ({selectedJob.score ?? 0} pts)
+                    </span>
+                    <p className="text-[11px] text-gray-400 mt-1 font-mono">Source: {selectedJob.source || "Public Feed"}</p>
+                  </div>
                 )}
               </div>
 
-              {selectedJob.url && (
-                <div className="mt-4">
-                  <a
-                    href={selectedJob.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm font-medium text-blue-600 hover:underline"
-                  >
-                    View Original Listing &rarr;
-                  </a>
-                </div>
-              )}
+              {/* Verified Source Link */}
+              <div className="mt-4 flex items-center justify-between">
+                <a
+                  href={selectedJob.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center space-x-1.5 text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline"
+                >
+                  <span>View Verified Source Listing</span>
+                  <span>&rarr;</span>
+                </a>
+              </div>
 
-              <div className="mt-8 pt-8 border-t border-gray-100">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500 mb-4">
+              {/* Match Criteria & Explanations */}
+              <div className="mt-6 p-4 rounded-xl bg-blue-50/60 border border-blue-100">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-blue-900 mb-2">
+                  Match Evaluation & Explainability
+                </h3>
+                {selectedJob.matchedSkills && selectedJob.matchedSkills.length > 0 && (
+                  <div className="mb-2">
+                    <span className="text-xs font-semibold text-gray-700 mr-2">Matched Skills:</span>
+                    <div className="inline-flex flex-wrap gap-1 mt-1">
+                      {selectedJob.matchedSkills.map((s) => (
+                        <span key={s} className="px-2 py-0.5 text-xs font-medium rounded-md bg-emerald-100 text-emerald-800">
+                          ✓ {s}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {selectedJob.matchReasons && selectedJob.matchReasons.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-xs text-gray-700 list-disc list-inside">
+                    {selectedJob.matchReasons.map((r, idx) => (
+                      <li key={idx}>{r}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Job Description */}
+              <div className="mt-6 pt-6 border-t border-gray-100">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">
                   Job Description
                 </h3>
-                <div className="prose prose-blue max-w-none text-gray-700 whitespace-pre-wrap">
+                <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap leading-relaxed font-sans">
                   {selectedJob.description}
                 </div>
               </div>
 
-              <div className="mt-10 pt-6 border-t border-gray-100 flex items-center justify-between">
+              {/* Action Buttons */}
+              <div className="mt-8 pt-6 border-t border-gray-100 flex items-center justify-between">
                 <button
                   onClick={() => setShowCopilot(!showCopilot)}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm flex items-center space-x-2"
+                  className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors shadow-xs flex items-center space-x-2"
                 >
                   <span>{showCopilot ? "Hide Copilot" : "Apply with Copilot"}</span>
                   <span>✨</span>
                 </button>
               </div>
 
-              {/* Integrated Copilot Review */}
+              {/* Integrated Copilot */}
               {showCopilot && (
                 <div className="mt-8 pt-6 border-t border-gray-200">
                   <ApplicationCopilot
-                    initialCoverLetter={`Dear Hiring Team at ${selectedJob.company},\n\nI am writing to express my strong interest in the ${selectedJob.title} role. As a B.Tech Computer Science student at VIT Vellore graduating in May 2028 with hands-on experience in distributed systems and backend engineering (including TypeScript, Node.js, Express, PostgreSQL, Prisma, Docker, and Redis), I am eager to contribute.\n\nSincerely,\nShourya Upadhyaya`}
+                    initialCoverLetter={`Dear Hiring Team at ${selectedJob.company},\n\nI am writing to express my strong interest in the ${selectedJob.title} position. As a B.Tech Computer Science student at VIT Vellore graduating in May 2028 with background in backend engineering, distributed systems, and full-stack development (TypeScript, Node.js, Express, PostgreSQL, Redis, Docker), I am confident I can contribute effectively to your team.\n\nThank you for considering my application.\n\nSincerely,\nShourya Upadhyaya`}
                   />
                 </div>
               )}
