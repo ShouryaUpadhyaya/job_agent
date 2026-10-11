@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id    Int     @id @default(autoincrement())
+  email String  @unique
+  name  String?
+}
+
+model JobListing {
+  id          String   @id @default(uuid())
+  externalId  String
+  source      String
+  title       String
+  company     String
+  url         String
+  description String
+  status      String   @default("NEW")
+  score       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  applications JobApplication[]
+
+  @@unique([externalId, source])
+}
+
+model CandidateProfile {
+  id         String   @id @default(uuid())
+  name       String
+  skills     String[]
+  experience Json?
+  education  Json?
+  applications JobApplication[]
+  documents    Document[]
+}
+
+model JobApplication {
+  id                 String           @id @default(uuid())
+  jobListingId       String
+  jobListing         JobListing       @relation(fields: [jobListingId], references: [id])
+  candidateProfileId String
+  candidateProfile   CandidateProfile @relation(fields: [candidateProfileId], references: [id])
+  status             String           @default("DRAFT")
+  isApproved         Boolean          @default(false)
+  notes              String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  documents          Document[]
+}
+
+model Document {
+  id                 String           @id @default(uuid())
+  type               String           // "RESUME" or "COVER_LETTER"
+  version            Int              @default(1)
+  content            String
+  candidateProfileId String
+  candidateProfile   CandidateProfile @relation(fields: [candidateProfileId], references: [id])
+  jobApplicationId   String?
+  jobApplication     JobApplication?  @relation(fields: [jobApplicationId], references: [id])
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  entityId  String
+  timestamp DateTime @default(now())
+  metadata  Json?
+}
