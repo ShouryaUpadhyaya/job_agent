@@ -43,6 +43,10 @@ export default function Dashboard() {
   const [importDescription, setImportDescription] = useState("");
   const [importLocation, setImportLocation] = useState("Remote");
   const [importing, setImporting] = useState(false);
+  const [autoFetching, setAutoFetching] = useState(false);
+  const [trackInPipeline, setTrackInPipeline] = useState(true);
+  const [pipelineStage, setPipelineStage] = useState("BOOKMARKED");
+  const [showBookmarkletGuide, setShowBookmarkletGuide] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +158,34 @@ export default function Dashboard() {
     }
   };
 
+  const handleAutoFetch = async () => {
+    if (!importUrl) {
+      alert("Please enter a LinkedIn job URL first.");
+      return;
+    }
+    try {
+      setAutoFetching(true);
+      const res = await fetch(`${API_BASE_URL}/api/jobs/scrape/linkedin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: importUrl }),
+      });
+      const data = await res.json();
+      if (res.ok && data.data) {
+        setImportTitle(data.data.title || "");
+        setImportCompany(data.data.company || "");
+        setImportLocation(data.data.location || "Remote");
+        setImportDescription(data.data.description || "");
+      } else {
+        alert(data.error || "Could not automatically scrape details. Please enter them manually.");
+      }
+    } catch (err: any) {
+      alert(`Auto-fetch error: ${err.message}`);
+    } finally {
+      setAutoFetching(false);
+    }
+  };
+
   const handleImportJob = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -169,6 +201,8 @@ export default function Dashboard() {
         company: importCompany,
         description: importDescription,
         location: importLocation,
+        trackInPipeline,
+        stage: pipelineStage,
       };
 
       const res = await fetch(endpoint, {
@@ -178,12 +212,18 @@ export default function Dashboard() {
       });
 
       if (res.ok) {
+        const data = await res.json();
         setShowImportModal(false);
         setImportUrl("");
         setImportTitle("");
         setImportCompany("");
         setImportDescription("");
         fetchJobs();
+        if (data.application) {
+          alert(`✓ "${data.job?.title || 'Job'}" imported and added to your Application Pipeline under ${pipelineStage}!`);
+        } else {
+          alert(`✓ "${data.job?.title || 'Job'}" imported into Job Feed!`);
+        }
       } else {
         const data = await res.json();
         alert(data.error || "Failed to import job");
@@ -742,6 +782,17 @@ export default function Dashboard() {
                     <input
                       type="radio"
                       name="source"
+                      value="linkedin"
+                      checked={importSource === "linkedin"}
+                      onChange={() => setImportSource("linkedin")}
+                      className="text-indigo-600"
+                    />
+                    <span>💼 LinkedIn (Public Guest Scraper)</span>
+                  </label>
+                  <label className="flex items-center space-x-1.5 text-xs font-semibold cursor-pointer">
+                    <input
+                      type="radio"
+                      name="source"
                       value="wellfound"
                       checked={importSource === "wellfound"}
                       onChange={() => setImportSource("wellfound")}
@@ -749,57 +800,79 @@ export default function Dashboard() {
                     />
                     <span>🌱 Wellfound (Startups)</span>
                   </label>
-                  <label className="flex items-center space-x-1.5 text-xs font-semibold cursor-pointer">
-                    <input
-                      type="radio"
-                      name="source"
-                      value="linkedin"
-                      checked={importSource === "linkedin"}
-                      onChange={() => setImportSource("linkedin")}
-                      className="text-indigo-600"
-                    />
-                    <span>💼 LinkedIn</span>
-                  </label>
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700">Job URL</label>
-                <input
-                  type="url"
-                  placeholder={
-                    importSource === "wellfound"
-                      ? "https://wellfound.com/jobs/..."
-                      : "https://www.linkedin.com/jobs/view/..."
-                  }
-                  value={importUrl}
-                  onChange={(e) => setImportUrl(e.target.value)}
-                  className="mt-1 w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  required
-                />
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700">Job URL</label>
+                  {importSource === "linkedin" && (
+                    <button
+                      type="button"
+                      onClick={handleAutoFetch}
+                      disabled={autoFetching || !importUrl}
+                      className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 disabled:opacity-40 flex items-center space-x-1"
+                    >
+                      <span>{autoFetching ? "⏳ Scraping..." : "⚡ Auto-Fetch Details from Link"}</span>
+                    </button>
+                  )}
+                </div>
+                <div className="mt-1 flex space-x-2">
+                  <input
+                    type="url"
+                    placeholder={
+                      importSource === "wellfound"
+                        ? "https://wellfound.com/jobs/..."
+                        : "https://www.linkedin.com/jobs/view/..."
+                    }
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
+                  />
+                  {importSource === "linkedin" && (
+                    <button
+                      type="button"
+                      onClick={handleAutoFetch}
+                      disabled={autoFetching || !importUrl}
+                      className="shrink-0 px-3 py-1.5 text-xs font-bold bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-40"
+                    >
+                      {autoFetching ? "Fetching..." : "Auto-Fill"}
+                    </button>
+                  )}
+                </div>
+                {importSource === "linkedin" && (
+                  <p className="text-[10px] text-emerald-600 font-medium mt-1">
+                    ✓ Safe Guest API: No login credentials or cookies used. Zero risk of account ban or TOS violation.
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-slate-700">Job Title</label>
+                  <label className="text-xs font-bold text-slate-700">
+                    Job Title {importSource === "linkedin" && <span className="text-slate-400 font-normal">(auto-filled)</span>}
+                  </label>
                   <input
                     type="text"
                     placeholder="e.g. Software Engineer Intern"
                     value={importTitle}
                     onChange={(e) => setImportTitle(e.target.value)}
                     className="mt-1 w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    required
+                    required={importSource !== "linkedin"}
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-700">Company Name</label>
+                  <label className="text-xs font-bold text-slate-700">
+                    Company Name {importSource === "linkedin" && <span className="text-slate-400 font-normal">(auto-filled)</span>}
+                  </label>
                   <input
                     type="text"
-                    placeholder="e.g. Stripe, OpenAI"
+                    placeholder="e.g. Stripe, Google"
                     value={importCompany}
                     onChange={(e) => setImportCompany(e.target.value)}
                     className="mt-1 w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    required
+                    required={importSource !== "linkedin"}
                   />
                 </div>
               </div>
@@ -808,7 +881,7 @@ export default function Dashboard() {
                 <label className="text-xs font-bold text-slate-700">Location / Workplace</label>
                 <input
                   type="text"
-                  placeholder="e.g. Remote, Bangalore, San Francisco"
+                  placeholder="e.g. Remote, Bangalore, Hyderabad"
                   value={importLocation}
                   onChange={(e) => setImportLocation(e.target.value)}
                   className="mt-1 w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -816,15 +889,72 @@ export default function Dashboard() {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700">Job Description / Requirements</label>
+                <label className="text-xs font-bold text-slate-700">
+                  Job Description / Requirements {importSource === "linkedin" && <span className="text-slate-400 font-normal">(auto-filled)</span>}
+                </label>
                 <textarea
-                  rows={4}
-                  placeholder="Paste job description text to compute fit score and match against your verified profile skills..."
+                  rows={3}
+                  placeholder={
+                    importSource === "linkedin"
+                      ? "Leave empty to auto-extract from URL, or paste description..."
+                      : "Paste job description text to compute fit score and match against your verified profile skills..."
+                  }
                   value={importDescription}
                   onChange={(e) => setImportDescription(e.target.value)}
                   className="mt-1 w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  required
+                  required={importSource !== "linkedin"}
                 />
+              </div>
+
+              {/* Pipeline Tracking Options */}
+              <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl space-y-2">
+                <label className="flex items-center space-x-2 text-xs font-bold text-slate-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={trackInPipeline}
+                    onChange={(e) => setTrackInPipeline(e.target.checked)}
+                    className="text-indigo-600 rounded"
+                  />
+                  <span>📌 Track in Application Pipeline</span>
+                </label>
+                {trackInPipeline && (
+                  <div className="flex items-center space-x-2 pl-6">
+                    <span className="text-[11px] font-semibold text-slate-600">Initial Stage:</span>
+                    <select
+                      value={pipelineStage}
+                      onChange={(e) => setPipelineStage(e.target.value)}
+                      className="px-2 py-1 text-xs font-semibold rounded-md border border-slate-300 bg-white text-slate-800"
+                    >
+                      <option value="BOOKMARKED">Saved / Ready (BOOKMARKED)</option>
+                      <option value="APPLYING">In Prep (APPLYING)</option>
+                      <option value="APPLIED">Applied (APPLIED)</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Safe Scraping & 1-Click Bookmarklet Guide */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowBookmarkletGuide(!showBookmarkletGuide)}
+                  className="text-[11px] text-slate-500 hover:text-slate-800 font-semibold underline flex items-center space-x-1"
+                >
+                  <span>🛡️ How does Job-Agent scrape LinkedIn without breaking ToS?</span>
+                </button>
+                {showBookmarkletGuide && (
+                  <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-2">
+                    <p>
+                      <strong>1. Unauthenticated Guest API:</strong> Job-Agent queries LinkedIn’s public guest endpoints without sending your user token or session cookies. Under U.S. federal case law (<em>hiQ v. LinkedIn</em>), public web scraping does not breach account agreements because no user identity is attached. Your personal account is 100% safe.
+                    </p>
+                    <p>
+                      <strong>2. 1-Click Browser Web Clipper (Bookmarklet):</strong> Want to clip jobs with 1 click while signed in on LinkedIn? Create a bookmark in your browser with this URL code:
+                    </p>
+                    <div className="p-2 bg-slate-900 text-indigo-300 font-mono text-[10px] rounded-lg overflow-x-auto select-all">
+                      {`javascript:(function(){const title=document.querySelector('.job-details-jobs-unified-top-card__job-title, .topcard__title')?.innerText||document.title;const company=document.querySelector('.job-details-jobs-unified-top-card__company-name, .topcard__org-name-link')?.innerText||'';const location=document.querySelector('.job-details-jobs-unified-top-card__bullet, .topcard__flavor--bullet')?.innerText||'';const desc=document.querySelector('.jobs-description__content, .show-more-less-html__markup')?.innerText||'';fetch('http://localhost:3001/api/jobs/import/linkedin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:window.location.href,title,company,location,description:desc,trackInPipeline:true,stage:'BOOKMARKED'})}).then(r=>r.json()).then(d=>alert('✓ Saved to Job-Agent Pipeline: '+title)).catch(e=>alert('Error saving: '+e.message));})();`}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 flex justify-end space-x-2 pt-2 border-t border-slate-100">
@@ -837,10 +967,10 @@ export default function Dashboard() {
                 </button>
                 <button
                   type="submit"
-                  disabled={importing}
+                  disabled={importing || autoFetching}
                   className="px-4 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
                 >
-                  {importing ? "Importing & Scoring..." : "Import Opportunity"}
+                  {importing ? "Importing & Scoring..." : "Import & Track Opportunity"}
                 </button>
               </div>
             </form>

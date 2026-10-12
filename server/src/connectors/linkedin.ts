@@ -22,21 +22,94 @@ export interface ApplicationChecklist {
   handoffUrl: string;
 }
 
+export interface ScrapedLinkedInJob {
+  jobId: string;
+  title: string;
+  company: string;
+  location: string;
+  description: string;
+  url: string;
+  isEasyApply?: boolean;
+}
+
 export function extractLinkedInJobId(url: string): string {
-  // e.g. https://www.linkedin.com/jobs/view/4021234567/
-  const viewMatch = url.match(/\/jobs\/view\/(\d+)/i);
+  // e.g. https://www.linkedin.com/jobs/view/4021234567/ or .../software-engineer-intern-4021234567
+  const viewMatch = url.match(/\/jobs\/view\/.*?(\d{8,12})/i);
   if (viewMatch && viewMatch[1]) {
     return viewMatch[1];
   }
 
   // e.g. currentJobId=4021234567
-  const paramMatch = url.match(/currentJobId=(\d+)/i);
+  const paramMatch = url.match(/currentJobId=(\d{8,12})/i);
   if (paramMatch && paramMatch[1]) {
     return paramMatch[1];
   }
 
+  // Any 8-12 digit sequence
+  const digitsMatch = url.match(/(\d{8,12})/);
+  if (digitsMatch && digitsMatch[1]) {
+    return digitsMatch[1];
+  }
+
   // Fallback hash
   return 'li-' + Math.abs(url.split('').reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0)).toString(36);
+}
+
+export async function scrapeLinkedInJobByUrl(rawUrl: string): Promise<ScrapedLinkedInJob> {
+  const jobId = extractLinkedInJobId(rawUrl);
+  if (!jobId || jobId.startsWith('li-')) {
+    throw new Error('Could not extract a valid numeric LinkedIn Job ID from the provided URL.');
+  }
+
+  const guestApiUrl = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`;
+
+  const response = await fetchWithRetry(guestApiUrl, {
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
+      Accept: 'text/html,application/xhtml+xml',
+    },
+    timeoutMs: 12000,
+  });
+
+  if (!response.ok) {
+    throw new Error(`LinkedIn guest service responded with HTTP ${response.status} (${response.statusText})`);
+  }
+
+  const html = await response.text();
+
+  const titleMatch =
+    html.match(/<h2 class="[^"]*topcard__title[^"]*">([\s\S]*?)<\/h2>/i) ||
+    html.match(/<h1 class="[^"]*topcard__title[^"]*">([\s\S]*?)<\/h1>/i) ||
+    html.match(/<h2 class="[^"]*top-card-layout__title[^"]*">([\s\S]*?)<\/h2>/i);
+  const title = titleMatch ? titleMatch[1].replace(/<[^>]*>/g, '').trim() : '';
+
+  const companyMatch =
+    html.match(/<a class="[^"]*topcard__org-name-link[^"]*"[^>]*>([\s\S]*?)<\/a>/i) ||
+    html.match(/<span class="[^"]*topcard__flavor[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
+  const company = companyMatch ? companyMatch[1].replace(/<[^>]*>/g, '').trim() : '';
+
+  const locMatch = html.match(/<span class="topcard__flavor topcard__flavor--bullet">([\s\S]*?)<\/span>/i);
+  const location = locMatch ? locMatch[1].replace(/<[^>]*>/g, '').trim() : 'India / Remote';
+
+  const descMatch =
+    html.match(/<div class="[^"]*show-more-less-html__markup[^"]*">([\s\S]*?)<\/div>/i) ||
+    html.match(/<section class="[^"]*description[^"]*">([\s\S]*?)<\/section>/i);
+  const description = descMatch ? descMatch[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+
+  const isEasyApply = html.includes('apply-button--easy-apply') || html.includes('Easy Apply');
+  const cleanUrl = `https://www.linkedin.com/jobs/view/${jobId}`;
+
+  return {
+    jobId,
+    title: title || 'Software Engineer',
+    company: company || 'Company',
+    location: location || 'India / Remote',
+    description: description || `${title} at ${company}`,
+    url: cleanUrl,
+    isEasyApply,
+  };
 }
 
 export function normalizeLinkedInJob(input: LinkedInImportInput): RawJobPayload {

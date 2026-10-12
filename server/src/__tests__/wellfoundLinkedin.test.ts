@@ -78,6 +78,12 @@ describe('Wellfound & LinkedIn Connectors and Workflows', () => {
       expect(normalized.tags).toContain('Hybrid');
     });
 
+    it('extracts job ID from various LinkedIn URL formats', () => {
+      expect(extractLinkedInJobId('https://www.linkedin.com/jobs/view/4021234567/')).toBe('4021234567');
+      expect(extractLinkedInJobId('https://in.linkedin.com/jobs/view/full-stack-engineer-at-selah-4475769875')).toBe('4475769875');
+      expect(extractLinkedInJobId('https://www.linkedin.com/jobs/search/?currentJobId=4468619421')).toBe('4468619421');
+    });
+
     it('generates pre-application checklist with Easy Apply recognition', () => {
       const checklist = generatePreApplicationChecklist({
         title: 'Software Engineer Intern',
@@ -113,7 +119,7 @@ describe('Wellfound & LinkedIn Connectors and Workflows', () => {
       expect(res.body.job.matchedSkills).toContain('TypeScript');
     });
 
-    it('POST /api/jobs/import/linkedin and GET /api/jobs/:id/checklist', async () => {
+    it('POST /api/jobs/import/linkedin supports trackInPipeline and checklist', async () => {
       const importRes = await request(app)
         .post('/api/jobs/import/linkedin')
         .send({
@@ -122,15 +128,27 @@ describe('Wellfound & LinkedIn Connectors and Workflows', () => {
           company: 'Amazon',
           description: 'Build services using TypeScript and Docker.',
           isEasyApply: true,
+          trackInPipeline: true,
+          stage: 'BOOKMARKED',
         });
 
       expect(importRes.status).toBe(201);
+      expect(importRes.body.application).toBeDefined();
+      expect(importRes.body.application.stage).toBe('BOOKMARKED');
       const jobId = importRes.body.job.id;
 
       const checklistRes = await request(app).get(`/api/jobs/${jobId}/checklist`);
       expect(checklistRes.status).toBe(200);
       expect(checklistRes.body.checklist.handoffUrl).toContain('linkedin.com');
       expect(checklistRes.body.checklist.steps.length).toBe(4);
+    });
+
+    it('POST /api/jobs/scrape/linkedin validates URL parameter', async () => {
+      const res = await request(app)
+        .post('/api/jobs/scrape/linkedin')
+        .send({});
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('url is required');
     });
   });
 });

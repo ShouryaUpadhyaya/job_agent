@@ -91,25 +91,97 @@ jobsRouter.post('/jobs/import/wellfound', async (req, res) => {
   }
 });
 
-// Import LinkedIn job listing
+// Scrape LinkedIn job details by URL without credentials (guest API)
+jobsRouter.post('/jobs/scrape/linkedin', async (req, res) => {
+  try {
+    const { scrapeLinkedInJobByUrl } = await import('../connectors/linkedin');
+    const { url } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: 'url is required' });
+    }
+
+    const data = await scrapeLinkedInJobByUrl(url);
+    res.json({ success: true, data });
+  } catch (error: any) {
+    console.error('Error scraping LinkedIn job:', error);
+    res.status(422).json({ error: error.message || 'Failed to scrape LinkedIn job' });
+  }
+});
+
+// Import LinkedIn job listing (with auto-scraping and optional pipeline tracking)
 jobsRouter.post('/jobs/import/linkedin', async (req, res) => {
   try {
-    const { normalizeLinkedInJob } = await import('../connectors/linkedin');
+    const { normalizeLinkedInJob, scrapeLinkedInJobByUrl } = await import('../connectors/linkedin');
     const { processAndUpsertJob } = await import('../jobs/normalization');
 
-    const { url, title, company, description, location, isEasyApply, workplaceType, tags } = req.body;
-    if (!url || !title || !company || !description) {
-      return res.status(400).json({ error: 'url, title, company, and description are required' });
+    let { url, title, company, description, location, isEasyApply, workplaceType, tags, trackInPipeline, stage, notes } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: 'url is required' });
+    }
+
+    // If required fields are missing, attempt automatic guest scrape
+    if (!title || !company || !description) {
+      try {
+        const scraped = await scrapeLinkedInJobByUrl(url);
+        title = title || scraped.title;
+        company = company || scraped.company;
+        location = location || scraped.location;
+        description = description || scraped.description;
+        if (isEasyApply === undefined && scraped.isEasyApply !== undefined) {
+          isEasyApply = scraped.isEasyApply;
+        }
+      } catch (scrapeErr: any) {
+        if (!title || !company || !description) {
+          return res.status(400).json({
+            error: `Could not automatically scrape LinkedIn job details: ${scrapeErr.message}. Please enter title, company, and description manually.`,
+          });
+        }
+      }
     }
 
     const raw = normalizeLinkedInJob({ url, title, company, description, location, isEasyApply, workplaceType, tags });
     const profile = await prisma.candidateProfile.findFirst();
     const result = await processAndUpsertJob(raw, profile);
 
+    let application = null;
+    if (trackInPipeline || stage) {
+      const targetStage = stage || 'BOOKMARKED';
+      const isApproved = targetStage === 'APPLIED';
+      const existingApp = await prisma.jobApplication.findFirst({
+        where: {
+          jobListingId: result.listing.id,
+          candidateProfileId: profile?.id,
+        },
+      });
+
+      if (existingApp) {
+        application = await prisma.jobApplication.update({
+          where: { id: existingApp.id },
+          data: {
+            stage: targetStage,
+            status: targetStage,
+            notes: notes || existingApp.notes || undefined,
+          },
+        });
+      } else {
+        application = await prisma.jobApplication.create({
+          data: {
+            jobListingId: result.listing.id,
+            candidateProfileId: profile?.id || '',
+            stage: targetStage,
+            status: targetStage,
+            isApproved,
+            notes: notes || `Imported via LinkedIn link (${result.listing.score ?? 0} pts match)`,
+          },
+        });
+      }
+    }
+
     res.status(result.isNew ? 201 : 200).json({
       message: result.isNew ? 'Job imported successfully' : 'Job listing updated',
       job: result.listing,
       isNew: result.isNew,
+      application,
     });
   } catch (error: any) {
     console.error('Error importing LinkedIn job:', error);
