@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db';
-import { JobListing } from '@prisma/client';
+import { CandidateProfile, JobListing } from '@prisma/client';
+import { ensureActiveProfile } from '../lib/profile';
+import { resumeForJob } from '../resumes/service';
 import {
   tailorResume,
   tailorCoverLetter,
@@ -9,6 +11,23 @@ import {
 } from '../resumes/tailor';
 
 export const copilotRouter = Router();
+
+/** The requested profile, or the active one (created if missing). Null only for an unknown explicit id. */
+async function resolveProfile(candidateProfileId?: unknown): Promise<CandidateProfile | null> {
+  if (candidateProfileId) return prisma.candidateProfile.findUnique({ where: { id: String(candidateProfileId) } });
+  return ensureActiveProfile();
+}
+
+/** Grounds generation in the job's best-matching resume (or the default one). */
+async function groundingFor(profile: CandidateProfile, job: Pick<JobListing, 'bestResumeId'> | null) {
+  const resume = await resumeForJob(profile.id, job?.bestResumeId);
+  return {
+    resumeText: resume?.content ?? null,
+    resumeId: resume?.id ?? null,
+    // Deterministic tailoring works off skills: prefer the chosen resume's list.
+    profileForSkills: resume?.skills.length ? { ...profile, skills: resume.skills } : profile,
+  };
+}
 
 // POST /api/copilot/generate - Backward compatible endpoint
 copilotRouter.post('/copilot/generate', async (req: Request, res: Response) => {
@@ -34,11 +53,12 @@ copilotRouter.post('/copilot/generate', async (req: Request, res: Response) => {
       return res.status(200).json({ content });
     }
 
+    const grounding = await groundingFor(profile, job);
     if (type === 'COVER_LETTER') {
-      const result = await tailorCoverLetterWithGemini(profile, job);
+      const result = await tailorCoverLetterWithGemini(profile, job, undefined, undefined, grounding.resumeText);
       return res.status(200).json({ content: result.formattedMarkdown });
     } else if (type === 'RESUME') {
-      const result = tailorResume(profile, job);
+      const result = tailorResume(grounding.profileForSkills, job);
       return res.status(200).json({ content: result.formattedMarkdown });
     } else {
       return res.status(400).json({ error: 'Invalid document type' });
@@ -61,15 +81,14 @@ copilotRouter.post('/copilot/tailor-resume', async (req: Request, res: Response)
       return res.status(404).json({ error: 'Job listing not found' });
     }
 
-    let profile = candidateProfileId
-      ? await prisma.candidateProfile.findUnique({ where: { id: candidateProfileId } })
-      : await prisma.candidateProfile.findFirst({ orderBy: { id: 'asc' } });
+    const profile = await resolveProfile(candidateProfileId);
 
     if (!profile) {
       return res.status(404).json({ error: 'Candidate profile not found' });
     }
 
-    const tailored = tailorResume(profile, job);
+    const grounding = await groundingFor(profile, job);
+    const tailored = tailorResume(grounding.profileForSkills, job);
 
     const doc = await prisma.document.create({
       data: {
@@ -83,12 +102,13 @@ copilotRouter.post('/copilot/tailor-resume', async (req: Request, res: Response)
       data: {
         action: 'RESUME_TAILORED',
         entityId: doc.id,
-        metadata: { jobId: job.id, company: job.company },
+        metadata: { jobId: job.id, company: job.company, resumeId: grounding.resumeId },
       },
     });
 
     res.json({
       documentId: doc.id,
+      resumeId: grounding.resumeId,
       content: tailored.formattedMarkdown,
       matchedSkills: tailored.matchedSkills,
       missingKeywords: tailored.missingKeywords,
@@ -112,15 +132,14 @@ copilotRouter.post('/copilot/tailor-cover-letter', async (req: Request, res: Res
       return res.status(404).json({ error: 'Job listing not found' });
     }
 
-    let profile = candidateProfileId
-      ? await prisma.candidateProfile.findUnique({ where: { id: candidateProfileId } })
-      : await prisma.candidateProfile.findFirst({ orderBy: { id: 'asc' } });
+    const profile = await resolveProfile(candidateProfileId);
 
     if (!profile) {
       return res.status(404).json({ error: 'Candidate profile not found' });
     }
 
-    const tailored = await tailorCoverLetterWithGemini(profile, job, question, wordLimit);
+    const grounding = await groundingFor(profile, job);
+    const tailored = await tailorCoverLetterWithGemini(profile, job, question, wordLimit, grounding.resumeText);
 
     const doc = await prisma.document.create({
       data: {
@@ -134,12 +153,13 @@ copilotRouter.post('/copilot/tailor-cover-letter', async (req: Request, res: Res
       data: {
         action: 'COVER_LETTER_TAILORED',
         entityId: doc.id,
-        metadata: { jobId: job.id, company: job.company },
+        metadata: { jobId: job.id, company: job.company, resumeId: grounding.resumeId },
       },
     });
 
     res.json({
       documentId: doc.id,
+      resumeId: grounding.resumeId,
       content: tailored.formattedMarkdown,
       subject: tailored.subject,
       recipient: tailored.recipient,
@@ -185,19 +205,19 @@ copilotRouter.post('/copilot/generate-answer', async (req: Request, res: Respons
       updatedAt: new Date(),
     } as unknown as JobListing);
 
-    let profile = candidateProfileId
-      ? await prisma.candidateProfile.findUnique({ where: { id: candidateProfileId } })
-      : await prisma.candidateProfile.findFirst({ orderBy: { id: 'asc' } });
+    const profile = await resolveProfile(candidateProfileId);
 
     if (!profile) {
       return res.status(404).json({ error: 'Candidate profile not found' });
     }
 
-    const answer = await generateAnswerWithGemini(profile, job, question, wordLimit);
+    const grounding = await groundingFor(profile, foundJob);
+    const answer = await generateAnswerWithGemini(profile, job, question, wordLimit, grounding.resumeText);
 
     res.json({
       question,
       answer,
+      resumeId: grounding.resumeId,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to generate answer' });
