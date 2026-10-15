@@ -188,7 +188,8 @@ function legacyEnvProfile() {
     currentRole: E.CURRENT_ROLE, company: E.COMPANY, education: E.EDUCATION,
     yearsOfExperience: E.YEARS_EXPERIENCE, skills: E.SKILLS, highlights: highlights.length ? highlights : undefined,
     noticePeriod: E.NOTICE_PERIOD, currentCTC: E.CURRENT_CTC, expectedCTC: E.EXPECTED_CTC, dob: E.DOB,
-    gender: E.GENDER, workAuth: E.WORK_AUTH, github: E.GITHUB_URL, linkedin: E.LINKEDIN_URL, portfolio: E.PORTFOLIO_URL,
+    // gender is deliberately not imported: the old UI wrote a hard-coded default into .env
+    workAuth: E.WORK_AUTH, github: E.GITHUB_URL, linkedin: E.LINKEDIN_URL, portfolio: E.PORTFOLIO_URL,
   };
 }
 

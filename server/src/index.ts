@@ -10,14 +10,17 @@ const server = app.listen(PORT, () => {
   if (process.env.NODE_ENV !== 'test' && process.env.DISABLE_SCHEDULER !== 'true') {
     initScheduler();
 
-    // Auto-sync Wellfound applications from applications.csv on startup
+    // Wellfound: import applications.csv (idempotent, forward-only) and reconcile runs that were
+    // active when the server stopped.
     (async () => {
       try {
         const { syncWellfoundApplicationsFromCsv } = await import('./connectors/wellfoundAutoApplyService');
         const wfResult = await syncWellfoundApplicationsFromCsv();
-        if (wfResult.newImported > 0 || wfResult.alreadyTracked > 0) {
-          console.log(`[Startup] Wellfound sync: ${wfResult.newImported} new imported, ${wfResult.alreadyTracked} already tracked, ${wfResult.contactsCreated} networking contacts created.`);
+        if (wfResult.newImported > 0 || wfResult.advanced > 0) {
+          console.log(`[Startup] Wellfound sync: ${wfResult.newImported} new, ${wfResult.advanced} advanced, ${wfResult.alreadyTracked} already tracked.`);
         }
+        const { reconcileRuns } = await import('./wellfound/runService');
+        await reconcileRuns();
       } catch (err: any) {
         console.warn(`[Startup] Wellfound initial sync skipped: ${err.message}`);
       }

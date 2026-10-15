@@ -1,8 +1,17 @@
 import fs from 'fs';
-import path from 'path';
+import crypto from 'crypto';
 import { prisma } from '../db';
-import { extractWellfoundJobId, normalizeWellfoundJob } from '../connectors/wellfound';
 import { processAndUpsertJob } from '../jobs/normalization';
+import { companyKey } from '../lib/company';
+import { canTransition, statusForStage } from '../lib/stages';
+import { ensureActiveProfile } from '../lib/profile';
+import { istDateKey, parseRunnerTimestamp } from '../lib/time';
+import { csvFile } from '../wellfound/paths';
+
+/**
+ * Imports the Wellfound runner's applications.csv into JobListing + JobApplication.
+ * Forward-only (never downgrades a stage the user or Gmail set), idempotent, and creates no contacts.
+ */
 
 export interface WellfoundCsvRow {
   date: string;
@@ -15,360 +24,227 @@ export interface WellfoundCsvRow {
   jd?: string;
 }
 
-/**
- * Robust CSV parser that handles quotes, escaped quotes, multiline fields, and commas.
- */
+/** RFC-4180 parser: quotes, escaped quotes, multiline fields, BOM. */
 export function parseWellfoundCsv(csvContent: string): WellfoundCsvRow[] {
-  // Strip UTF-8 BOM if present
-  const cleanContent = csvContent.replace(/^\uFEFF/, '').trim();
-  if (!cleanContent) return [];
-
+  const src = csvContent.replace(/^﻿/, '');
   const rows: string[][] = [];
-  let currentRow: string[] = [];
-  let currentField = '';
-  let insideQuotes = false;
-
-  for (let i = 0; i < cleanContent.length; i++) {
-    const char = cleanContent[i];
-    const nextChar = cleanContent[i + 1];
-
-    if (char === '"') {
-      if (insideQuotes && nextChar === '"') {
-        // Escaped quote ("")
-        currentField += '"';
-        i++;
-      } else {
-        // Toggle quote
-        insideQuotes = !insideQuotes;
-      }
-    } else if (char === ',' && !insideQuotes) {
-      currentRow.push(currentField);
-      currentField = '';
-    } else if ((char === '\r' || char === '\n') && !insideQuotes) {
-      if (char === '\r' && nextChar === '\n') {
-        i++; // Skip \r\n
-      }
-      currentRow.push(currentField);
-      if (currentRow.length > 0 && currentRow.some((f) => f.trim().length > 0)) {
-        rows.push(currentRow);
-      }
-      currentRow = [];
-      currentField = '';
-    } else {
-      currentField += char;
-    }
+  let row: string[] = [];
+  let field = '';
+  let quoted = false;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (quoted) {
+      if (c === '"' && src[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') quoted = false;
+      else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && src[i + 1] === '\n') i++;
+      row.push(field); field = '';
+      if (row.some((f) => f.trim())) rows.push(row);
+      row = [];
+    } else field += c;
   }
-
-  // Final field if any
-  if (currentField.length > 0 || currentRow.length > 0) {
-    currentRow.push(currentField);
-    if (currentRow.some((f) => f.trim().length > 0)) {
-      rows.push(currentRow);
-    }
-  }
-
+  row.push(field);
+  if (row.some((f) => f.trim())) rows.push(row);
   if (rows.length <= 1) return [];
 
-  // Header is row 0: "Date","Site","Role","Company","CTC/Salary","Skills","Job Link","Job Description"
-  const parsedRows: WellfoundCsvRow[] = [];
-  for (let r = 1; r < rows.length; r++) {
-    const cols = rows[r];
-    const rawRole = (cols[2] || '').trim();
-    const rawCompany = (cols[3] || '').trim();
+  return rows.slice(1).map((cols) => {
+    const role = (cols[2] || '').trim();
     const link = (cols[6] || '').trim();
     const jd = (cols[7] || '').trim();
-    const cleanCompany = cleanWellfoundCompanyName(rawCompany, link, rawRole, jd);
-
-    parsedRows.push({
+    return {
       date: (cols[0] || '').trim(),
       site: (cols[1] || 'wellfound').trim(),
-      role: rawRole,
-      company: cleanCompany,
+      role,
+      company: cleanWellfoundCompanyName(cols[3] || '', link, role, jd),
       salary: (cols[4] || '').trim(),
       skills: (cols[5] || '').trim(),
-      link: link,
-      jd: jd,
-    });
-  }
-
-  return parsedRows;
+      link,
+      jd,
+    };
+  });
 }
 
-/**
- * Known mapping of Wellfound job IDs to real company names,
- * used when the scraper captured the global sticky page banner (e.g. "Certa...")
- * instead of the job-specific company.
- */
-export const WELLFOUND_KNOWN_COMPANIES: Record<string, string> = {
-  '3263581': 'Decentro',
-  '4824501': 'The Date Crew',
-  '3147916': 'Kyoto Creative',
-  '3299524': 'Dobbe AI',
-  '3693386': 'WhatBytes',
-  '3029813': 'WhatBytes',
-  '4746834': 'Runmivo',
-  '3534348': 'Auto Wisdom',
-  '4084234': 'Auto Wisdom',
-  '4756722': 'Bitslap IT',
-  '4751410': 'AlwayzON',
-  '3783479': 'vaiu.ai',
-  '3610503': 'Modulus Seventeen',
-  '4829680': 'AVYAM LABS',
-  '4827953': 'CloudSEK',
-  '3327406': 'Wubble.AI',
-  '4704098': 'MAVR',
-};
+const NOT_A_COMPANY = /^(the )?(role|job|position|opportunity|internship|team|company|us|you|wellfound|it|this)$/i;
 
 /**
- * Cleans noisy company headers captured from Wellfound HTML text (e.g. "CertaActively HiringPromoted...")
- * and resolves the real company name using job link metadata if the global header was captured.
+ * Cleans company text scraped from Wellfound cards ("CertaActively HiringPromoted…51-200 Employees").
+ * When the scrape captured nothing, falls back to an "About <Company>" heading in the JD. Returns ''
+ * when no company can be determined (callers decide how to label it).
  */
-export function cleanWellfoundCompanyName(
-  rawCompany: string,
-  jobLink?: string,
-  role?: string,
-  jd?: string
-): string {
-  // 1. If job link contains a known Wellfound job ID, resolve real company
-  if (jobLink) {
-    const idMatch = jobLink.match(/\/jobs\/(\d+)/);
-    if (idMatch && WELLFOUND_KNOWN_COMPANIES[idMatch[1]]) {
-      return WELLFOUND_KNOWN_COMPANIES[idMatch[1]];
-    }
-  }
-
-  // 2. Check JD for "About <Company>"
-  if (jd) {
-    const aboutMatch = jd.match(/\*?About (?:The )?([A-Za-z0-9\s.]+?)\s*\*?\s*(?:We’re|We are|is |—|-|\n|$)/i);
-    if (aboutMatch && aboutMatch[1].trim().length < 40) {
-      const candidate = aboutMatch[1].replace(/[*_]/g, '').trim();
-      if (!/the job|the role|us|wellfound/i.test(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  // 3. Fallback for specific unlinked roles
-  if (role && role.includes('Software Engineer Intern') && (!jobLink || jobLink.includes('Part-time'))) {
-    return 'UnQue Cloudbook';
-  }
-
-  if (!rawCompany) return 'Unknown Company';
-
-  // 4. Clean noisy text scraped from Wellfound headers
-  let cleaned = rawCompany
+export function cleanWellfoundCompanyName(rawCompany: string, _jobLink?: string, _role?: string, jd?: string): string {
+  const cleaned = (rawCompany || '')
     .replace(/\s+/g, ' ')
-    .replace(/(?:Actively\s*Hiring|Promoted|Hiring|Employees|\d+-\d+\s*Employees).*/i, '')
+    .replace(/(?:Actively\s*Hiring|Promoted|Hiring|\d+-\d+\s*Employees|Employees).*/i, '')
     .trim();
-
-  // If cleaning resulted in empty string, fallback to first word or raw
-  if (!cleaned) {
-    cleaned = rawCompany.split(/[\s,]+/)[0] || 'Unknown Company';
+  if (cleaned) return cleaned;
+  const about = (jd || '').match(/\bAbout\s+((?:[Tt]he\s+)?[A-Z][\w.&'-]*(?:\s+[A-Z0-9][\w.&'-]*){0,4})/);
+  if (about) {
+    const candidate = about[1].replace(/[*_]/g, '').trim();
+    if (candidate.length < 40 && !NOT_A_COMPANY.test(candidate)) return candidate;
   }
-  return cleaned;
+  return '';
+}
+
+export function resolveWellfoundCsvPath(customPath?: string): string | null {
+  const candidate = customPath || csvFile();
+  try {
+    return fs.statSync(candidate).isFile() ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readWellfoundCsv(customPath?: string): WellfoundCsvRow[] {
+  const file = resolveWellfoundCsvPath(customPath);
+  return file ? parseWellfoundCsv(fs.readFileSync(file, 'utf8')) : [];
+}
+
+/** Applications dated on the IST calendar day of `now` (rows are ISO or legacy IST-local strings). */
+export function countTodayApplications(rows: Pick<WellfoundCsvRow, 'date'>[], now: Date = new Date()): number {
+  const today = istDateKey(now);
+  return rows.filter((r) => {
+    const d = parseRunnerTimestamp(r.date);
+    return d !== null && istDateKey(d) === today;
+  }).length;
+}
+
+/** Stable identity of a CSV job: Wellfound's numeric job id, or a hash of company+title for link-less rows. */
+export function wellfoundJobIdentity(row: Pick<WellfoundCsvRow, 'link' | 'role' | 'company'>): { externalId: string; url: string } {
+  const url = ((row.link || '').match(/https?:\/\/[^\s|",]+/) || [''])[0];
+  const id = url.match(/\/jobs\/(\d+)/);
+  if (id) return { externalId: id[1], url };
+  const hash = crypto.createHash('sha1').update(`${companyKey(row.company)}|${(row.role || '').toLowerCase().trim()}`).digest('hex').slice(0, 12);
+  return { externalId: `wf-${hash}`, url: url || '' };
 }
 
 export interface SyncWellfoundApplicationsResult {
   totalRows: number;
+  uniqueJobs: number;
   newImported: number;
   alreadyTracked: number;
-  contactsCreated: number;
+  advanced: number;
   errors: string[];
 }
 
-/**
- * Resolves the location of applications.csv across local workspace and Docker environments.
- */
-export function resolveWellfoundCsvPath(customPath?: string): string | null {
-  if (customPath && fs.existsSync(customPath)) {
-    return customPath;
-  }
-  const candidates = [
-    process.env.WELLFOUND_APPLICATIONS_CSV,
-    path.resolve(__dirname, '../../../wellfound_autoApply/applications.csv'),
-    path.resolve(__dirname, '../../wellfound_autoApply/applications.csv'),
-    path.resolve(__dirname, '../../../applications.csv'),
-    path.resolve(process.cwd(), 'wellfound_autoApply/applications.csv'),
-    path.resolve(process.cwd(), 'applications.csv'),
-    '/app/wellfound_autoApply/applications.csv',
-    '/app/applications.csv',
-  ].filter(Boolean) as string[];
-
-  for (const cand of candidates) {
-    if (fs.existsSync(cand)) {
-      try {
-        if (fs.statSync(cand).isFile()) {
-          return cand;
-        }
-      } catch (e) {}
-    }
-  }
-  return null;
+interface AggregatedJob {
+  externalId: string;
+  url: string;
+  role: string;
+  company: string;
+  salary: string;
+  skills: string;
+  jd: string;
+  submittedAt: Date | null;
 }
 
-/**
- * Syncs all applied jobs from applications.csv into JobListing, JobApplication (stage=APPLIED),
- * and generates matching networking contacts.
- */
-export async function syncWellfoundApplicationsFromCsv(
-  csvPath?: string
-): Promise<SyncWellfoundApplicationsResult> {
-  const filePath = resolveWellfoundCsvPath(csvPath);
-
-  if (!filePath || !fs.existsSync(filePath)) {
-    return {
-      totalRows: 0,
-      newImported: 0,
-      alreadyTracked: 0,
-      contactsCreated: 0,
-      errors: [`applications.csv not found (searched standard workspace and Docker paths)`],
-    };
-  }
-
-  const csvContent = fs.readFileSync(filePath, 'utf8');
-  const rows = parseWellfoundCsv(csvContent);
-
-  let profile = await prisma.candidateProfile.findFirst();
-  if (!profile) {
-    profile = await prisma.candidateProfile.create({
-      data: {
-        name: 'Default Candidate',
-        email: 'candidate@example.com',
-        targetRole: 'Software Engineer',
-      },
-    });
-  }
-  let newImported = 0;
-  let alreadyTracked = 0;
-  let contactsCreated = 0;
-  const errors: string[] = [];
-
+/** One entry per job: earliest submission, first known company, longest description. */
+function aggregate(rows: WellfoundCsvRow[]): AggregatedJob[] {
+  const byId = new Map<string, AggregatedJob>();
   for (const row of rows) {
+    if (!row.role) continue;
+    const { externalId, url } = wellfoundJobIdentity(row);
+    const at = parseRunnerTimestamp(row.date);
+    const cur = byId.get(externalId);
+    if (!cur) {
+      byId.set(externalId, { externalId, url, role: row.role, company: row.company, salary: row.salary || '', skills: row.skills || '', jd: row.jd || '', submittedAt: at });
+      continue;
+    }
+    if (!cur.company && row.company) cur.company = row.company;
+    if (!cur.salary && row.salary) cur.salary = row.salary;
+    if (!cur.skills && row.skills) cur.skills = row.skills;
+    if ((row.jd || '').length > cur.jd.length) cur.jd = row.jd || '';
+    if (at && (!cur.submittedAt || at < cur.submittedAt)) cur.submittedAt = at;
+  }
+  return [...byId.values()];
+}
+
+export async function syncWellfoundApplicationsFromCsv(csvPath?: string): Promise<SyncWellfoundApplicationsResult> {
+  const filePath = resolveWellfoundCsvPath(csvPath);
+  if (!filePath) {
+    return { totalRows: 0, uniqueJobs: 0, newImported: 0, alreadyTracked: 0, advanced: 0, errors: ['applications.csv not found'] };
+  }
+  const rows = parseWellfoundCsv(fs.readFileSync(filePath, 'utf8'));
+  const jobs = aggregate(rows);
+  const profile = await ensureActiveProfile();
+  const result: SyncWellfoundApplicationsResult = {
+    totalRows: rows.length, uniqueJobs: jobs.length, newImported: 0, alreadyTracked: 0, advanced: 0, errors: [],
+  };
+
+  for (const job of jobs) {
     try {
-      if (!row.role || !row.company) continue;
-
-      const cleanCompany = cleanWellfoundCompanyName(row.company, row.link, row.role, row.jd);
-      const jobUrl = row.link && row.link.startsWith('http')
-        ? row.link.split(/\s*\|\s*/)[0].trim()
-        : `https://wellfound.com/jobs/${Math.abs(row.role.split('').reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0))}`;
-
-      const externalId = extractWellfoundJobId(jobUrl);
-
-      // Normalize and upsert job listing
-      const rawPayload = normalizeWellfoundJob({
-        url: jobUrl,
-        title: row.role,
-        company: cleanCompany,
-        description: row.jd || `Auto-applied role: ${row.role} at ${cleanCompany}`,
-        salary: row.salary,
-        tags: row.skills ? row.skills.split(';').map((s) => s.trim()) : [],
-      });
-
-      const { listing } = await processAndUpsertJob(rawPayload, profile);
-
-      // Parse submission date
-      let submittedDate = new Date();
-      if (row.date) {
-        const parsedD = new Date(row.date);
-        if (!isNaN(parsedD.getTime())) {
-          submittedDate = parsedD;
-        }
+      let company = job.company;
+      if (!company) {
+        const existingListing = await prisma.jobListing.findUnique({
+          where: { externalId_source: { externalId: job.externalId, source: 'wellfound' } },
+        });
+        company = existingListing?.company || 'Unknown company';
       }
-
-      // Check if job application already tracked
-      const existingApp = await prisma.jobApplication.findFirst({
-        where: {
-          jobListingId: listing.id,
-          candidateProfileId: profile?.id || undefined,
+      const key = companyKey(company);
+      const { listing } = await processAndUpsertJob(
+        {
+          externalId: job.externalId,
+          source: 'wellfound',
+          title: job.role,
+          company,
+          url: job.url || `https://wellfound.com/jobs`,
+          description: job.jd || `Applied on Wellfound: ${job.role} at ${company}.`,
+          tags: job.skills ? job.skills.split(';').map((s) => s.trim()).filter(Boolean) : [],
         },
-      });
+        profile
+      );
 
-      if (existingApp) {
-        alreadyTracked++;
-        // Update stage to APPLIED if still in lower stage
-        if (existingApp.stage !== 'APPLIED') {
-          await prisma.jobApplication.update({
-            where: { id: existingApp.id },
-            data: {
-              stage: 'APPLIED',
-              status: 'APPLIED',
-              isApproved: true,
-              submittedAt: submittedDate,
-            },
-          });
-        }
-      } else if (profile) {
-        await prisma.jobApplication.create({
-          data: {
-            jobListingId: listing.id,
+      let existing = await prisma.jobApplication.findFirst({
+        where: { jobListingId: listing.id, candidateProfileId: profile.id },
+      });
+      if (!existing && key) {
+        // Same role at the same company tracked from another source (manual, email)
+        existing = await prisma.jobApplication.findFirst({
+          where: {
             candidateProfileId: profile.id,
-            stage: 'APPLIED',
-            status: 'APPLIED',
-            isApproved: true,
-            notes: `Submitted via Wellfound AutoApply on ${row.date || 'today'}. Salary: ${row.salary || 'N/A'}`,
-            submittedAt: submittedDate,
+            companyKey: key,
+            jobListing: { title: { equals: job.role, mode: 'insensitive' } },
           },
         });
-        newImported++;
       }
 
-      // Auto-generate target networking contacts for this company if none exist
-      const existingContacts = await prisma.networkingContact.findMany({
-        where: { company: cleanCompany },
+      if (existing) {
+        result.alreadyTracked++;
+        const data: Record<string, unknown> = {};
+        if (canTransition(existing.stage, 'APPLIED', 'wellfound')) {
+          data.stage = 'APPLIED';
+          data.status = statusForStage('APPLIED');
+          data.isApproved = true;
+          result.advanced++;
+        }
+        if (!existing.submittedAt && job.submittedAt) data.submittedAt = job.submittedAt;
+        if (!existing.source) data.source = 'wellfound';
+        if (!existing.companyKey && key) data.companyKey = key;
+        if (!existing.appliedUrl && job.url) data.appliedUrl = job.url;
+        if (Object.keys(data).length) await prisma.jobApplication.update({ where: { id: existing.id }, data });
+        continue;
+      }
+
+      await prisma.jobApplication.create({
+        data: {
+          jobListingId: listing.id,
+          candidateProfileId: profile.id,
+          stage: 'APPLIED',
+          status: statusForStage('APPLIED'),
+          isApproved: true,
+          source: 'wellfound',
+          companyKey: key,
+          appliedUrl: job.url || null,
+          submittedAt: job.submittedAt ?? new Date(),
+          notes: `Submitted via Wellfound auto-apply${job.submittedAt ? ` on ${istDateKey(job.submittedAt)} (IST)` : ''}.${job.salary ? ` Salary: ${job.salary}` : ''}`,
+        },
       });
-
-      if (existingContacts.length === 0) {
-        const targetSearchUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(
-          cleanCompany + ' software engineer VIT Vellore'
-        )}`;
-        const recruiterSearchUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(
-          cleanCompany + ' recruiter campus talent'
-        )}`;
-
-        await prisma.networkingContact.createMany({
-          data: [
-            {
-              name: `Engineering Team (${cleanCompany})`,
-              company: cleanCompany,
-              role: 'Software Engineer / Tech Lead',
-              profileUrl: targetSearchUrl,
-              headline: `Engineer at ${cleanCompany}`,
-              team: 'Engineering',
-              vitAlumni: true,
-              outreachAngle: `Applied for ${row.role}. Connect to ask about engineering team culture and workflow.`,
-              relevanceScore: 95,
-              targetJobId: listing.id,
-              status: 'RESEARCHED',
-              notes: `Auto-generated follow-up target after Wellfound application for ${row.role}.`,
-            },
-            {
-              name: `Talent Partner (${cleanCompany})`,
-              company: cleanCompany,
-              role: 'Recruiter / Talent Acquisition',
-              profileUrl: recruiterSearchUrl,
-              headline: `Talent Acquisition at ${cleanCompany}`,
-              team: 'People / Recruiting',
-              vitAlumni: false,
-              outreachAngle: `Submitted application for ${row.role}. Inquire about candidate review timeline.`,
-              relevanceScore: 90,
-              targetJobId: listing.id,
-              status: 'RESEARCHED',
-              notes: `Recruiter contact for ${cleanCompany} application status.`,
-            },
-          ],
-        });
-        contactsCreated += 2;
-      }
-    } catch (rowErr: any) {
-      errors.push(`Error syncing row "${row.role} @ ${row.company}": ${rowErr.message}`);
+      result.newImported++;
+    } catch (err: any) {
+      result.errors.push(`"${job.role} @ ${job.company || '?'}": ${err.message}`);
     }
   }
-
-  return {
-    totalRows: rows.length,
-    newImported,
-    alreadyTracked,
-    contactsCreated,
-    errors,
-  };
+  return result;
 }

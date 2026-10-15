@@ -80,12 +80,12 @@ export function initScheduler(intervalMinutes?: number): ConnectorScheduler {
       console.error('[Scheduler] Sync error:', err);
     }
 
-    // Auto-sync Wellfound applications from applications.csv into database & networking contacts
+    // Import new rows from the Wellfound applications.csv (idempotent; never downgrades a stage)
     try {
       const { syncWellfoundApplicationsFromCsv } = await import('../connectors/wellfoundAutoApplyService');
       const wfResult = await syncWellfoundApplicationsFromCsv();
-      if (wfResult.newImported > 0 || wfResult.contactsCreated > 0) {
-        console.log(`[Scheduler] Wellfound auto-sync: ${wfResult.newImported} new applications, ${wfResult.contactsCreated} networking contacts created.`);
+      if (wfResult.newImported > 0 || wfResult.advanced > 0) {
+        console.log(`[Scheduler] Wellfound auto-sync: ${wfResult.newImported} new, ${wfResult.advanced} advanced.`);
       }
     } catch (err) {
       console.error('[Scheduler] Wellfound sync error:', err);

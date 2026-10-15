@@ -91,7 +91,8 @@ function startRun(body) {
   fs.mkdirSync(lib.LOGS_DIR, { recursive: true });
   fs.mkdirSync(diagnosticsDir, { recursive: true });
 
-  const args = [RUNNER, 'wellfound', `--run-id=${runId}`, `--log-file=${logFile}`, `--diagnostics-dir=${diagnosticsDir}`];
+  // The agent is the only writer of the log file: runner stdout lines (already timestamped) + stderr.
+  const args = [RUNNER, 'wellfound', `--run-id=${runId}`, `--diagnostics-dir=${diagnosticsDir}`];
   if (mode === 'LIVE') args.push('--live');
   else args.push('--dry-run');
   const max = parseInt(body.max, 10);
@@ -100,10 +101,13 @@ function startRun(body) {
   if (Number.isFinite(cap) && cap > 0) args.push(`--daily-cap=${cap}`);
   if (body.visible) args.push('--visible');
   if (body.trace) args.push('--trace');
+  // Per-run config file (personal data; scripts/wellfound/out is git-ignored), removed when the run ends.
+  let configFile = null;
   if (body.config && typeof body.config === 'object' && body.config.CV) {
     fs.mkdirSync(lib.OUT_DIR, { recursive: true });
-    fs.writeFileSync(lib.RUNNER_CONFIG_FILE, JSON.stringify({ ...body.config, generatedAt: new Date().toISOString() }, null, 2));
-    args.push(`--config=${lib.RUNNER_CONFIG_FILE}`);
+    configFile = path.join(lib.OUT_DIR, `run-${runId}.json`);
+    fs.writeFileSync(configFile, JSON.stringify({ ...body.config, generatedAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
+    args.push(`--config=${configFile}`);
   }
 
   appendLog(logFile, 'AGENT', `starting runner on host ${require('os').hostname()}: node ${args.slice(1).map((a) => path.isAbsolute(a) ? path.relative(lib.ROOT, a) : a).join(' ')}`);
@@ -125,6 +129,7 @@ function startRun(body) {
   const out = lineSplitter((line) => {
     const m = line.match(/ SUMMARY\s+(\{.*\})\s*$/);
     if (m) { try { run.summary = JSON.parse(m[1]); } catch (e) {} }
+    try { fs.appendFileSync(logFile, line + '\n'); } catch (e) {}
   });
   const err = lineSplitter((line) => { if (line.trim()) appendLog(logFile, 'STDERR', line); });
   child.stdout.on('data', (c) => out.push(c));
@@ -143,6 +148,7 @@ function startRun(body) {
     run.endedAt = new Date().toISOString();
     run.child = null;
     if (activeRunId === runId) activeRunId = null;
+    if (configFile) fs.rm(configFile, { force: true }, () => {});
     appendLog(logFile, 'AGENT', `runner exited: code=${code}${signal ? ` signal=${signal}` : ''} status=${run.status}`);
     say(`run ${runId} ended: ${run.status}`);
   });
