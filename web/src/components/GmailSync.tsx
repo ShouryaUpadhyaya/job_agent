@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { api, ApiError, errorMessage } from "../lib/api";
+import { useDeepLink, useScrollToDeepLink } from "../lib/urlParams";
 import {
   ConnectionCard,
   DEFAULT_FILTERS,
@@ -102,6 +103,22 @@ export default function GmailSync() {
     return () => controller.abort();
   }, [filters, reloadKey]);
 
+  // Deep link `?tab=GMAIL&id=…`: highlight that event, fetching it when filters or the list
+  // limit leave it out.
+  const deepLinkId = useDeepLink("GMAIL")?.id ?? null;
+  const [linkedEvent, setLinkedEvent] = useState<EmailEvent | null>(null);
+  const linkedInList = Boolean(deepLinkId && events.some((e) => e.id === deepLinkId));
+  useEffect(() => {
+    if (!deepLinkId || eventsLoading || linkedInList) return;
+    const controller = new AbortController();
+    api<EmailEvent[]>("/api/gmail/events", { query: { id: deepLinkId }, signal: controller.signal })
+      .then((rows) => setLinkedEvent(rows[0] ?? null))
+      .catch(() => undefined); // The list itself reports load errors.
+    return () => controller.abort();
+  }, [deepLinkId, eventsLoading, linkedInList]);
+  const shownEvents = linkedEvent && !linkedInList ? [linkedEvent, ...events] : events;
+  useScrollToDeepLink("email", deepLinkId, shownEvents.some((e) => e.id === deepLinkId));
+
   const changeFilters = (f: EventFilters) => {
     setEventsLoading(true);
     setFilters(f);
@@ -195,7 +212,14 @@ export default function GmailSync() {
         onSync={sync}
       />
 
-      <EventsList events={events} loading={eventsLoading} error={eventsError} filters={filters} onFilters={changeFilters} />
+      <EventsList
+        events={shownEvents}
+        loading={eventsLoading}
+        error={eventsError}
+        filters={filters}
+        onFilters={changeFilters}
+        highlightedId={deepLinkId}
+      />
 
       <DemoTools demoCount={status?.demoEvents ?? 0} onChanged={reloadAll} />
     </div>

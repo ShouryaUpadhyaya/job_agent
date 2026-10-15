@@ -8,13 +8,15 @@ type Props = {
   applications: PipelineApplication[];
   /** Stages to show as columns (all when empty). */
   stages: Stage[];
+  /** Deep-linked application to highlight. */
+  highlightedId?: string | null;
   onPatch: (id: string, patch: ApplicationPatch) => void;
   onDelete: (id: string) => void;
   onPeopleChanged: (companyKey: string) => void;
 };
 
 /** One column per stage, in the server's sort order within each column. */
-export default function KanbanBoard({ applications, stages, onPatch, onDelete, onPeopleChanged }: Props) {
+export default function KanbanBoard({ applications, stages, highlightedId, onPatch, onDelete, onPeopleChanged }: Props) {
   const columns: { key: string; label: string; tone: string; items: PipelineApplication[] }[] = (stages.length ? stages : [...STAGES]).map(
     (s) => ({ key: s, label: STAGE_META[s].label, tone: STAGE_META[s].column, items: applications.filter((a) => a.stage === s) })
   );
@@ -35,7 +37,7 @@ export default function KanbanBoard({ applications, stages, onPatch, onDelete, o
                 <p className="text-[11px] text-slate-400 text-center py-4">Nothing here</p>
               ) : (
                 col.items.map((app) => (
-                  <ApplicationCard key={app.id} app={app} compact onPatch={onPatch} onDelete={onDelete} onPeopleChanged={onPeopleChanged} />
+                  <ApplicationCard key={app.id} app={app} compact highlighted={app.id === highlightedId} onPatch={onPatch} onDelete={onDelete} onPeopleChanged={onPeopleChanged} />
                 ))
               )}
             </div>

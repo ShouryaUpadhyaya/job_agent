@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { api, errorMessage } from "@/lib/api";
+import { ApiError, api, errorMessage } from "@/lib/api";
+import { useDeepLink, useScrollToDeepLink } from "@/lib/urlParams";
 import type { CompanyPeople } from "./networking";
 import ApplicationCard from "./pipeline/ApplicationCard";
 import KanbanBoard from "./pipeline/KanbanBoard";
@@ -41,6 +42,25 @@ export default function ApplicationsPipeline() {
     setToasts((t) => [...t.slice(-3), { id, message, tone }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
   }, []);
+
+  // Deep link (`?tab=PIPELINE&id=…`): highlight that card. It's fetched on its own if the
+  // current list doesn't include it, so filters can never hide it.
+  const deepLinkId = useDeepLink("PIPELINE")?.id ?? null;
+  const deepLinkTried = useRef(false);
+  const deepLinkVisible = Boolean(deepLinkId && applications.some((a) => a.id === deepLinkId));
+  useEffect(() => {
+    if (!deepLinkId || initialLoading || deepLinkTried.current) return;
+    deepLinkTried.current = true;
+    if (appsRef.current.some((a) => a.id === deepLinkId)) return;
+    api<PipelineApplication>(`/api/applications/${encodeURIComponent(deepLinkId)}`)
+      .then((app) => {
+        if (app?.id) setApplications((list) => (list.some((a) => a.id === app.id) ? list : [app, ...list]));
+      })
+      .catch((err) =>
+        notify(err instanceof ApiError && err.status === 404 ? "That application no longer exists." : `Couldn't open the linked application: ${errorMessage(err)}`)
+      );
+  }, [deepLinkId, initialLoading, notify]);
+  useScrollToDeepLink("application", deepLinkId, deepLinkVisible && !initialLoading);
 
   const loadStats = useCallback(() => setStatsKey((k) => k + 1), []);
   const reload = () => {
@@ -212,6 +232,7 @@ export default function ApplicationsPipeline() {
       ) : view === "kanban" ? (
         <KanbanBoard
           applications={applications}
+          highlightedId={deepLinkId}
           stages={filters.stages}
           onPatch={patchApplication}
           onDelete={deleteApplication}
@@ -220,7 +241,14 @@ export default function ApplicationsPipeline() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {applications.map((app) => (
-            <ApplicationCard key={app.id} app={app} onPatch={patchApplication} onDelete={deleteApplication} onPeopleChanged={refreshPeople} />
+            <ApplicationCard
+              key={app.id}
+              app={app}
+              highlighted={app.id === deepLinkId}
+              onPatch={patchApplication}
+              onDelete={deleteApplication}
+              onPeopleChanged={refreshPeople}
+            />
           ))}
         </div>
       )}

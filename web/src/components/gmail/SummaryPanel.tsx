@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { dashboardHref } from "@/lib/urlParams";
 import { CLASSIFICATION_LABELS, GmailSummary, KIND_LABELS, formatWhen } from "./types";
 
 const KIND_TONE: Record<string, string> = {
@@ -76,7 +77,7 @@ export function SummaryPanel({ summary, loading, error }: { summary: GmailSummar
           <ul className="text-xs text-slate-700 space-y-1">
             {summary.statusChanges.map((c) => (
               <li key={c.eventId}>
-                <a href="?tab=PIPELINE" className="font-semibold hover:underline">
+                <a href={dashboardHref("PIPELINE", { id: c.applicationId })} className="font-semibold hover:underline">
                   {c.company} · {c.title}
                 </a>
                 : {c.from} → {c.to}
@@ -89,12 +90,15 @@ export function SummaryPanel({ summary, loading, error }: { summary: GmailSummar
 
       <div className="flex flex-wrap gap-4 text-xs text-slate-600">
         {summary.newApplications.length > 0 && (
-          <a href="?tab=PIPELINE" className="hover:underline">
+          <a
+            href={dashboardHref("PIPELINE", { id: summary.newApplications.length === 1 ? summary.newApplications[0].id : null })}
+            className="hover:underline"
+          >
             {summary.newApplications.length} new application{summary.newApplications.length > 1 ? "s" : ""} detected
           </a>
         )}
         {summary.jobAlerts.emails > 0 && (
-          <a href="?tab=DISCOVERY" className="hover:underline">
+          <a href={dashboardHref("DISCOVERY")} className="hover:underline">
             {summary.jobAlerts.emails} job alert{summary.jobAlerts.emails > 1 ? "s" : ""}, {summary.jobAlerts.listingsAdded} new listings
           </a>
         )}

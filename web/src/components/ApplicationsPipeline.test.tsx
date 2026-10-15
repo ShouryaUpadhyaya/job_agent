@@ -267,4 +267,40 @@ describe("ApplicationsPipeline", () => {
     render(<ApplicationsPipeline />);
     expect(await screen.findByText("No Applications Tracked Yet")).toBeDefined();
   });
+
+  describe("deep links", () => {
+    afterEach(() => window.history.replaceState(null, "", "/"));
+
+    it("highlights and scrolls to the linked application", async () => {
+      window.history.replaceState(null, "", "/?tab=PIPELINE&id=app-2");
+      const scroll = vi.fn();
+      Element.prototype.scrollIntoView = scroll;
+      mockFetch();
+      render(<ApplicationsPipeline />);
+      const card = await screen.findByTestId("application-app-2");
+      await waitFor(() => expect(card.getAttribute("data-highlighted")).toBe("true"));
+      expect(screen.getByTestId("application-app-1").getAttribute("data-highlighted")).toBeNull();
+      await waitFor(() => expect(scroll).toHaveBeenCalled());
+      // Already in the list: no extra fetch.
+      expect(calls.some((c) => c.url.includes("/api/applications/app-2"))).toBe(false);
+    });
+
+    it("fetches a linked application that isn't in the list and shows it first", async () => {
+      window.history.replaceState(null, "", "/?tab=PIPELINE&id=app-9");
+      const extra = { ...mockApplications[0], id: "app-9", job: job("job-9", "Platform Intern", "Zepto", null, 50) };
+      mockFetch((url) => (url.includes("/api/applications/app-9") ? reply(extra) : undefined));
+      render(<ApplicationsPipeline />);
+      const card = await screen.findByTestId("application-app-9");
+      expect(card.getAttribute("data-highlighted")).toBe("true");
+      expect(within(card).getByText("Platform Intern")).toBeDefined();
+    });
+
+    it("ignores ids meant for another tab", async () => {
+      window.history.replaceState(null, "", "/?tab=NETWORKING&id=app-2");
+      mockFetch();
+      render(<ApplicationsPipeline />);
+      const card = await screen.findByTestId("application-app-2");
+      expect(card.getAttribute("data-highlighted")).toBeNull();
+    });
+  });
 });

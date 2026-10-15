@@ -42,4 +42,12 @@ describe("Dashboard", () => {
     await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage job sources" })).toBeDefined());
     expect(window.location.search).toBe("?tab=DISCOVERY");
   });
+
+  it("drops record deep-link params when switching to another tab", async () => {
+    window.history.replaceState(null, "", "/?tab=PIPELINE&id=app-1&companyKey=razorpay");
+    global.fetch = vi.fn(() => new Promise(() => {})) as unknown as typeof fetch;
+    render(<Dashboard />);
+    fireEvent.click(screen.getByRole("button", { name: "🤝 Networking CRM" }));
+    expect(window.location.search).toBe("?tab=NETWORKING");
+  });
 });

@@ -3,18 +3,21 @@
 import React, { useState } from "react";
 import { PeopleStrip } from "../networking";
 import { ApplicationPatch, PipelineApplication, STAGES, STAGE_META, Stage, formatDate, isStage } from "./types";
+import { HIGHLIGHT_CLASS, deepLinkElementId } from "@/lib/urlParams";
 import { FitPill, MatchPill, SourceBadge, StageBadge } from "./ui";
 
 type Props = {
   app: PipelineApplication;
   /** Kanban cards are narrower and get previous/next stage buttons. */
   compact?: boolean;
+  /** Target of a `?tab=PIPELINE&id=…` deep link. */
+  highlighted?: boolean;
   onPatch: (id: string, patch: ApplicationPatch) => void;
   onDelete: (id: string) => void;
   onPeopleChanged: (companyKey: string) => void;
 };
 
-export default function ApplicationCard({ app, compact = false, onPatch, onDelete, onPeopleChanged }: Props) {
+export default function ApplicationCard({ app, compact = false, highlighted = false, onPatch, onDelete, onPeopleChanged }: Props) {
   const [editingNotes, setEditingNotes] = useState(false);
   const [draft, setDraft] = useState(app.notes || "");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -35,8 +38,11 @@ export default function ApplicationCard({ app, compact = false, onPatch, onDelet
 
   return (
     <article
+      id={deepLinkElementId("application", app.id)}
       data-testid={`application-${app.id}`}
-      className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow flex flex-col gap-3 min-w-0"
+      data-highlighted={highlighted || undefined}
+      aria-current={highlighted || undefined}
+      className={`bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow flex flex-col gap-3 min-w-0 ${highlighted ? HIGHLIGHT_CLASS : ""}`}
     >
       <header className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">

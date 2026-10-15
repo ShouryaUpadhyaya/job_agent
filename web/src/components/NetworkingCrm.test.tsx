@@ -175,4 +175,52 @@ describe("NetworkingCrm", () => {
     await waitFor(() => expect(screen.getByText("LinkedIn: Zepto + VIT Vellore")).toBeDefined());
     expect(screen.getByText("LinkedIn: Zepto + VIT Vellore").getAttribute("target")).toBe("_blank");
   });
+
+  describe("deep links", () => {
+    afterEach(() => window.history.replaceState(null, "", "/"));
+
+    it("prefilters by companyKey from the URL", async () => {
+      window.history.replaceState(null, "", "/?tab=NETWORKING&companyKey=razorpay");
+      mockApi();
+      render(<NetworkingCrm />);
+      await waitFor(() => expect(contactListCalls().length).toBeGreaterThan(0));
+      expect(contactListCalls()[0].url).toContain("companyKey=razorpay");
+      expect((screen.getByLabelText("Company") as HTMLSelectElement).value).toBe("razorpay");
+    });
+
+    it("accepts a company name and keeps it selectable when it has no contacts yet", async () => {
+      window.history.replaceState(null, "", "/?tab=NETWORKING&company=Zepto");
+      mockApi(undefined, []);
+      render(<NetworkingCrm />);
+      await waitFor(() => expect(contactListCalls().length).toBeGreaterThan(0));
+      expect(contactListCalls()[0].url).toContain("companyKey=Zepto");
+      await waitFor(() => expect((screen.getByLabelText("Company") as HTMLSelectElement).value).toBe("Zepto"));
+    });
+
+    it("highlights the linked contact", async () => {
+      window.history.replaceState(null, "", "/?tab=NETWORKING&id=c2");
+      mockApi();
+      render(<NetworkingCrm />);
+      const card = await screen.findByTestId("contact-c2");
+      expect(card.getAttribute("data-highlighted")).toBe("true");
+      expect(screen.getByTestId("contact-c1").getAttribute("data-highlighted")).toBeNull();
+      expect(calls.some((c) => c.url.includes("/api/networking/contacts/c2"))).toBe(false);
+    });
+
+    it("fetches a linked contact that the list doesn't include", async () => {
+      window.history.replaceState(null, "", "/?tab=NETWORKING&id=c9");
+      mockApi((url) => (url.includes("/api/networking/contacts/c9") ? reply(contact({ id: "c9", name: "Neha Gupta" })) : undefined));
+      render(<NetworkingCrm />);
+      const card = await screen.findByTestId("contact-c9");
+      expect(card.getAttribute("data-highlighted")).toBe("true");
+      expect(within(card).getByText("Neha Gupta")).toBeDefined();
+    });
+
+    it("reports a linked contact that no longer exists", async () => {
+      window.history.replaceState(null, "", "/?tab=NETWORKING&id=gone");
+      mockApi((url) => (url.includes("/api/networking/contacts/gone") ? reply({ error: "Contact not found" }, false, 404) : undefined));
+      render(<NetworkingCrm />);
+      expect(await screen.findByText("The linked contact no longer exists.")).toBeDefined();
+    });
+  });
 });

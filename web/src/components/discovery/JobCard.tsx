@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { deepLinkElementId } from "@/lib/urlParams";
 import { Job, freshnessText, freshnessTone, splitReasons, statusTone } from "./types";
 
 type Props = {
@@ -16,7 +17,7 @@ export default function JobCard({ job, selected, onSelect, onUserStatus }: Props
   const dismissed = job.userStatus === "DISMISSED";
 
   return (
-    <li className={`border-l-4 ${selected ? "bg-blue-50 border-blue-600" : "border-transparent hover:bg-slate-50"} ${dismissed ? "opacity-60" : ""}`}>
+    <li id={deepLinkElementId("job", job.id)} className={`border-l-4 ${selected ? "bg-blue-50 border-blue-600" : "border-transparent hover:bg-slate-50"} ${dismissed ? "opacity-60" : ""}`}>
       <div className="p-4">
         <button onClick={() => onSelect(job)} className="w-full text-left focus:outline-none" data-testid={`job-item-${job.id}`}>
           <div className="flex items-start justify-between gap-2">

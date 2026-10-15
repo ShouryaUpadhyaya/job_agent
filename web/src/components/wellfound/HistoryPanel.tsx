@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { api, buildUrl, errorMessage } from "@/lib/api";
+import { deepLinkElementId, useScrollToDeepLink } from "@/lib/urlParams";
 import RunLog from "./RunLog";
 import { Card, ModeBadge, StatusBadge, duration, formatIst } from "./ui";
 import { DiagnosticsListing, WellfoundRun } from "./types";
@@ -68,9 +69,10 @@ function Diagnostics({ runId }: { runId: string }) {
   );
 }
 
-export default function HistoryPanel({ refreshKey }: { refreshKey: number }) {
+export default function HistoryPanel({ refreshKey, initialRunId = null }: { refreshKey: number; initialRunId?: string | null }) {
   const [runs, setRuns] = useState<WellfoundRun[] | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  // A deep-linked run stays selected even when it's older than the 50 listed.
+  const [selected, setSelected] = useState<string | null>(initialRunId);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -90,6 +92,7 @@ export default function HistoryPanel({ refreshKey }: { refreshKey: number }) {
   }, [load, refreshKey]);
 
   const current = selected || runs?.[0]?.id || null;
+  useScrollToDeepLink("run", initialRunId, Boolean(runs?.some((r) => r.id === initialRunId)));
 
   return (
     <div className="space-y-6">
@@ -123,6 +126,9 @@ export default function HistoryPanel({ refreshKey }: { refreshKey: number }) {
                 {runs.map((r) => (
                   <tr
                     key={r.id}
+                    id={deepLinkElementId("run", r.id)}
+                    data-testid={`run-${r.id}`}
+                    data-selected={current === r.id || undefined}
                     onClick={() => setSelected(r.id)}
                     className={`border-b border-slate-100 cursor-pointer hover:bg-slate-50 ${current === r.id ? "bg-indigo-50/60" : ""}`}
                   >

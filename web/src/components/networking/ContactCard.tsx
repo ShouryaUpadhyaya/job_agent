@@ -2,18 +2,21 @@
 
 import React, { useState } from "react";
 import { api, errorMessage } from "@/lib/api";
+import { HIGHLIGHT_CLASS, deepLinkElementId } from "@/lib/urlParams";
 import { CONTACT_STATUSES, Contact, MESSAGE_LABELS, MessageType, NetworkingMessage, STATUS_LABELS, canonicalType } from "./types";
 import { AlumniBadge, Badge, ContactLinks, CopyButton, PersonaBadge, PriorityPill, SourceBadge, StatusBadge, formatDate } from "./ui";
 
 type Props = {
   contact: Contact;
+  /** Target of a `?tab=NETWORKING&id=…` deep link. */
+  highlighted?: boolean;
   onChanged: () => void;
   onEdit: (contact: Contact) => void;
   /** Open the draft modal: a new draft of `type`, or an existing message. */
   onDraft: (contact: Contact, type: MessageType, existing?: NetworkingMessage) => void;
 };
 
-export default function ContactCard({ contact, onChanged, onEdit, onDraft }: Props) {
+export default function ContactCard({ contact, highlighted = false, onChanged, onEdit, onDraft }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -41,7 +44,13 @@ export default function ContactCard({ contact, onChanged, onEdit, onDraft }: Pro
   const alumni = contact.vitAlumni || /\bVIT\b/i.test(contact.school || "");
 
   return (
-    <article className={`bg-white rounded-xl border p-4 flex flex-col gap-3 ${contact.followUpDue ? "border-rose-200" : "border-slate-200"}`}>
+    <article
+      id={deepLinkElementId("contact", contact.id)}
+      data-testid={`contact-${contact.id}`}
+      data-highlighted={highlighted || undefined}
+      aria-current={highlighted || undefined}
+      className={`bg-white rounded-xl border p-4 flex flex-col gap-3 ${contact.followUpDue ? "border-rose-200" : "border-slate-200"} ${highlighted ? HIGHLIGHT_CLASS : ""}`}
+    >
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h4 className="text-sm font-bold text-slate-900">{contact.name}</h4>

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "@/lib/api";
+import { useDeepLink, useScrollToDeepLink } from "@/lib/urlParams";
 import FilterSidebar from "./discovery/FilterSidebar";
 import JobCard from "./discovery/JobCard";
 import JobDetail from "./discovery/JobDetail";
@@ -32,7 +33,12 @@ export default function JobDiscovery({
   const [error, setError] = useState<string | null>(null);
   const [facets, setFacets] = useState<Facets | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Deep link `?tab=DISCOVERY&id=…` selects that job; it's fetched on its own when it isn't
+  // on the first page.
+  const deepLinkId = useDeepLink("DISCOVERY")?.id ?? null;
+  const [selectedId, setSelectedId] = useState<string | null>(deepLinkId);
+  const [linkedJob, setLinkedJob] = useState<Job | null>(null);
+  const deepLinkTried = useRef(false);
   const [showAdd, setShowAdd] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -135,7 +141,18 @@ export default function JobDiscovery({
     }
   };
 
-  const selected = jobs.find((j) => j.id === selectedId) || null;
+  const linkedOnPage = Boolean(deepLinkId && jobs.some((j) => j.id === deepLinkId));
+  useEffect(() => {
+    if (!deepLinkId || loading || deepLinkTried.current) return;
+    deepLinkTried.current = true;
+    if (linkedOnPage) return;
+    api<Job>(`/api/jobs/${encodeURIComponent(deepLinkId)}`)
+      .then(setLinkedJob)
+      .catch((err) => setMessage(`Couldn't open the linked job: ${errorMessage(err)}`));
+  }, [deepLinkId, loading, linkedOnPage]);
+  useScrollToDeepLink("job", deepLinkId, linkedOnPage && !loading);
+
+  const selected = jobs.find((j) => j.id === selectedId) || (linkedJob && linkedJob.id === selectedId ? linkedJob : null);
   const targetText = profile
     ? [profile.targetRole, profile.targetGradYear ? `${profile.targetGradYear} grad` : null, profile.school].filter(Boolean).join(" · ")
     : "";

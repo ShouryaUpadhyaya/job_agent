@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "@/lib/api";
+import { useDeepLink } from "@/lib/urlParams";
 import RunPanel from "./wellfound/RunPanel";
 import HistoryPanel from "./wellfound/HistoryPanel";
 import AppliedPanel from "./wellfound/AppliedPanel";
@@ -22,7 +23,9 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 export default function WellfoundAutoApplyManager() {
-  const [tab, setTab] = useState<TabId>("RUN");
+  // Deep link `?tab=WELLFOUND&id=<run>` opens History & Diagnostics on that run.
+  const linkedRunId = useDeepLink("WELLFOUND")?.id ?? null;
+  const [tab, setTab] = useState<TabId>(linkedRunId ? "HISTORY" : "RUN");
   const [overview, setOverview] = useState<WellfoundOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -131,7 +134,7 @@ export default function WellfoundAutoApplyManager() {
       </div>
 
       {tab === "RUN" && <RunPanel overview={overview} onChanged={refresh} />}
-      {tab === "HISTORY" && <HistoryPanel refreshKey={refreshKey} />}
+      {tab === "HISTORY" && <HistoryPanel refreshKey={refreshKey} initialRunId={linkedRunId} />}
       {tab === "APPLIED" && <AppliedPanel refreshKey={refreshKey} onSynced={refresh} />}
       {tab === "PROFILE" && <ProfilePanel onSaved={refresh} />}
       {tab === "ZEN" && <ZenPanel />}

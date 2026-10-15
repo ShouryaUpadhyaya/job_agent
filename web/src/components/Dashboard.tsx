@@ -8,6 +8,7 @@ import NetworkingCrm from "./NetworkingCrm";
 import GmailSync from "./GmailSync";
 import DailyBriefing from "./DailyBriefing";
 import WellfoundAutoApplyManager from "./WellfoundAutoApplyManager";
+import { DEEP_LINK_PARAMS } from "@/lib/urlParams";
 
 const TABS = [
   { id: "DISCOVERY", label: "🎯 Job Discovery" },
@@ -39,6 +40,8 @@ function useTabParam(): [TabId, (tab: TabId) => void] {
   const select = (next: TabId) => {
     setTab(next);
     const url = new URL(window.location.href);
+    // Record ids/filters in the URL belong to the tab they were linked to.
+    if (url.searchParams.get("tab") !== next) for (const p of DEEP_LINK_PARAMS) url.searchParams.delete(p);
     url.searchParams.set("tab", next);
     url.searchParams.delete("sources");
     window.history.replaceState(null, "", url.toString());

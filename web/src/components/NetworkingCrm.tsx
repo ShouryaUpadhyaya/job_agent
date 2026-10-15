@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { api, errorMessage } from "@/lib/api";
+import { ApiError, api, errorMessage } from "@/lib/api";
+import { useDeepLink, useScrollToDeepLink } from "@/lib/urlParams";
 import CompanyPeoplePanel from "./networking/CompanyPeoplePanel";
 import ContactCard from "./networking/ContactCard";
 import MessageDraftModal from "./networking/MessageDraftModal";
@@ -52,7 +53,12 @@ export default function NetworkingCrm() {
   /** Key of the request whose response is shown; "loading" while it lags the current one. */
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  // Deep link: `?tab=NETWORKING&id=…` highlights a contact; `companyKey=` / `company=` prefilter.
+  const deepLink = useDeepLink("NETWORKING");
+  const [filters, setFilters] = useState<Filters>(() => ({
+    ...EMPTY_FILTERS,
+    companyKey: deepLink?.companyKey || deepLink?.company || "",
+  }));
   const [search, setSearch] = useState("");
   const q = useDebounced(search.trim(), 300);
   const [reloadKey, setReloadKey] = useState(0);
@@ -110,6 +116,27 @@ export default function NetworkingCrm() {
     return () => controller.abort();
   }, [reloadKey]);
 
+  // A linked contact that the current list doesn't include is fetched (again after each
+  // reload, so edits on its card show) and shown first.
+  const deepLinkId = deepLink?.id ?? null;
+  const [linkedContact, setLinkedContact] = useState<Contact | null>(null);
+  const firstLoadDone = loadedKey !== null;
+  const linkedInList = Boolean(deepLinkId && contacts.some((c) => c.id === deepLinkId));
+  useEffect(() => {
+    if (!deepLinkId || !firstLoadDone || linkedInList) return;
+    const controller = new AbortController();
+    api<Contact>(`/api/networking/contacts/${encodeURIComponent(deepLinkId)}`, { signal: controller.signal })
+      .then(setLinkedContact)
+      .catch((err) => {
+        if ((err as Error).name === "AbortError") return;
+        setLinkedContact(null);
+        setError(err instanceof ApiError && err.status === 404 ? "The linked contact no longer exists." : `Couldn't open the linked contact: ${errorMessage(err)}`);
+      });
+    return () => controller.abort();
+  }, [deepLinkId, firstLoadDone, linkedInList, reloadKey]);
+  const shown = linkedContact && !linkedInList ? [linkedContact, ...contacts] : contacts;
+  useScrollToDeepLink("contact", deepLinkId, shown.some((c) => c.id === deepLinkId));
+
   const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => setFilters((f) => ({ ...f, [key]: value }));
   const filtersActive = JSON.stringify({ ...filters, sort: "" }) !== JSON.stringify({ ...EMPTY_FILTERS, sort: "" }) || q !== "";
 
@@ -155,6 +182,9 @@ export default function NetworkingCrm() {
           />
           <select aria-label="Company" value={filters.companyKey} onChange={(e) => setFilter("companyKey", e.target.value)} className={select}>
             <option value="">All companies</option>
+            {filters.companyKey && !facets?.companies.some((c) => c.companyKey === filters.companyKey) && (
+              <option value={filters.companyKey}>{filters.companyKey}</option>
+            )}
             {facets?.companies.map((c) => (
               <option key={c.companyKey} value={c.companyKey}>
                 {c.company} ({c.count})
@@ -262,9 +292,9 @@ export default function NetworkingCrm() {
         </p>
       )}
 
-      {loading && contacts.length === 0 ? (
+      {loading && shown.length === 0 ? (
         <p className="text-center py-10 text-sm text-slate-400">Loading contacts…</p>
-      ) : contacts.length === 0 ? (
+      ) : shown.length === 0 ? (
         noContactsAtAll ? (
           <div className="bg-white rounded-xl border border-slate-200 p-8 text-center space-y-3">
             <h3 className="text-base font-bold text-slate-800">No contacts yet</h3>
@@ -294,10 +324,11 @@ export default function NetworkingCrm() {
         )
       ) : (
         <div className={`grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 ${loading ? "opacity-60" : ""}`}>
-          {contacts.map((c) => (
+          {shown.map((c) => (
             <ContactCard
               key={c.id}
               contact={c}
+              highlighted={c.id === deepLinkId}
               onChanged={reload}
               onEdit={setEditing}
               onDraft={(contact, type, existing) => setDraft({ contact, type, existing })}

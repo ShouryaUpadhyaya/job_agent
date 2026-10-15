@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { HIGHLIGHT_CLASS, dashboardHref, deepLinkElementId } from "@/lib/urlParams";
 import { CLASSIFICATIONS, CLASSIFICATION_LABELS, CLASSIFICATION_TONES, EmailEvent, formatWhen } from "./types";
 
 export interface EventFilters {
@@ -24,9 +25,11 @@ interface Props {
   error: string | null;
   filters: EventFilters;
   onFilters: (f: EventFilters) => void;
+  /** Event targeted by a `?tab=GMAIL&id=…` deep link. */
+  highlightedId?: string | null;
 }
 
-export function EventsList({ events, loading, error, filters, onFilters }: Props) {
+export function EventsList({ events, loading, error, filters, onFilters, highlightedId }: Props) {
   const set = (patch: Partial<EventFilters>) => onFilters({ ...filters, ...patch });
   const select = "px-2 py-1.5 text-xs rounded-lg border border-slate-300 bg-white";
 
@@ -73,7 +76,14 @@ export function EventsList({ events, loading, error, filters, onFilters }: Props
       ) : (
         <ul className="divide-y divide-slate-100">
           {events.map((ev) => (
-            <li key={ev.id} className="p-4">
+            <li
+              key={ev.id}
+              id={deepLinkElementId("email", ev.id)}
+              data-testid={`email-event-${ev.id}`}
+              data-highlighted={ev.id === highlightedId || undefined}
+              aria-current={ev.id === highlightedId || undefined}
+              className={`p-4 ${ev.id === highlightedId ? `bg-amber-50 ${HIGHLIGHT_CLASS}` : ""}`}
+            >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -101,12 +111,12 @@ export function EventsList({ events, loading, error, filters, onFilters }: Props
                   )}
                   <div className="mt-2 flex flex-wrap gap-3 text-[11px] font-semibold">
                     {ev.jobApplication && (
-                      <a href="?tab=PIPELINE" className="text-indigo-700 hover:underline">
+                      <a href={dashboardHref("PIPELINE", { id: ev.jobApplication.id })} className="text-indigo-700 hover:underline">
                         Application: {ev.jobApplication.jobListing.company} · {ev.jobApplication.jobListing.title} ({ev.jobApplication.stage})
                       </a>
                     )}
                     {ev.networkingContact && (
-                      <a href="?tab=NETWORKING" className="text-emerald-700 hover:underline">
+                      <a href={dashboardHref("NETWORKING", { id: ev.networkingContact.id })} className="text-emerald-700 hover:underline">
                         Contact: {ev.networkingContact.name} ({ev.networkingContact.company})
                       </a>
                     )}
