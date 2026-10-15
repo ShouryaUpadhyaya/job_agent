@@ -1,261 +1,231 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { api, errorMessage } from "@/lib/api";
+import type { CompanyPeople } from "./networking";
+import ApplicationCard from "./pipeline/ApplicationCard";
+import KanbanBoard from "./pipeline/KanbanBoard";
+import Toolbar, { View } from "./pipeline/Toolbar";
+import { ApplicationPatch, PipelineApplication, PipelineFilters, PipelineStats, isStage, statusForStage } from "./pipeline/types";
+import { Toast, Toasts } from "./pipeline/ui";
 
-export type Application = {
-  id: string;
-  jobListingId: string;
-  stage: string;
-  status: string;
-  isApproved: boolean;
-  notes?: string;
-  appliedUrl?: string;
-  submittedAt?: string;
-  createdAt: string;
-  jobListing?: {
-    title: string;
-    company: string;
-    url: string;
-    location?: string;
-  };
-};
+export type { PipelineApplication as Application } from "./pipeline/types";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const DEFAULT_FILTERS: PipelineFilters = { q: "", stages: [], source: "", hasAlumni: false, sort: "fit" };
 
-const STAGES = [
-  { key: "BOOKMARKED", label: "Saved / Ready", badge: "bg-blue-50 text-blue-700 border-blue-200" },
-  { key: "APPLYING", label: "In Prep", badge: "bg-amber-50 text-amber-700 border-amber-200" },
-  { key: "APPLIED", label: "Applied", badge: "bg-purple-50 text-purple-700 border-purple-200" },
-  { key: "INTERVIEWING", label: "Interviewing", badge: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  { key: "OFFERED", label: "Offered", badge: "bg-green-100 text-green-800 border-green-300" },
-  { key: "REJECTED", label: "Rejected / Closed", badge: "bg-gray-100 text-gray-600 border-gray-200" },
-];
-
+/**
+ * Application pipeline: server-side filtering and sorting (fit, match, alumni…), list or board
+ * view, and optimistic edits that roll back with an inline error if the server refuses.
+ */
 export default function ApplicationsPipeline() {
-  const [applications, setApplications] = useState<Application[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
-  const [editingNotes, setEditingNotes] = useState("");
-
-  const fetchApplications = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await fetch(`${API_BASE_URL}/api/applications`);
-      if (!res.ok) throw new Error("Failed to fetch applications");
-      const data = await res.json();
-      setApplications(data);
-    } catch (err: any) {
-      setError(err.message || "Failed to load applications");
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  const [applications, setApplications] = useState<PipelineApplication[]>([]);
+  const [stats, setStats] = useState<PipelineStats | null>(null);
+  const [filters, setFilters] = useState<PipelineFilters>(DEFAULT_FILTERS);
+  const [search, setSearch] = useState("");
+  const [view, setView] = useState<View>("list");
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loadedKey, setLoadedKey] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [statsKey, setStatsKey] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const requestId = useRef(0);
+  const toastId = useRef(0);
+  const appsRef = useRef<PipelineApplication[]>([]);
   useEffect(() => {
-    fetchApplications();
+    appsRef.current = applications;
+  }, [applications]);
+
+  const notify = useCallback((message: string, tone: Toast["tone"] = "error") => {
+    const id = ++toastId.current;
+    setToasts((t) => [...t.slice(-3), { id, message, tone }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
   }, []);
 
-  const handleUpdateStage = async (id: string, newStage: string) => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/applications/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stage: newStage }),
+  const loadStats = useCallback(() => setStatsKey((k) => k + 1), []);
+  const reload = () => {
+    setReloadKey((k) => k + 1);
+    loadStats();
+  };
+
+  // The list: refetched whenever the filters change or a reload is requested. Only the very
+  // first load shows the full spinner; later ones show a small "Updating…" hint.
+  const requestKey = JSON.stringify({ filters, reloadKey });
+  const refreshing = !initialLoading && loadedKey !== requestKey;
+  useEffect(() => {
+    const id = ++requestId.current;
+    const f = filters;
+    api<PipelineApplication[]>("/api/applications", {
+      query: { q: f.q, stage: f.stages, source: f.source, hasAlumni: f.hasAlumni || undefined, sort: f.sort },
+    })
+      .then((data) => {
+        if (id !== requestId.current) return;
+        setApplications(Array.isArray(data) ? data : []);
+        setLoadError(null);
+      })
+      .catch((err) => {
+        if (id === requestId.current) setLoadError(errorMessage(err));
+      })
+      .finally(() => {
+        if (id !== requestId.current) return;
+        setLoadedKey(JSON.stringify({ filters: f, reloadKey }));
+        setInitialLoading(false);
       });
-      if (res.ok) {
-        await fetchApplications();
-      }
+  }, [filters, reloadKey]);
+
+  useEffect(() => {
+    api<PipelineStats>("/api/applications/stats")
+      .then(setStats)
+      .catch(() => undefined); // Counts are decorative; the list itself reports errors.
+  }, [statsKey]);
+
+  // Debounce the search box into the filters.
+  useEffect(() => {
+    if (search === filters.q) return;
+    const t = setTimeout(() => setFilters((f) => ({ ...f, q: search })), 300);
+    return () => clearTimeout(t);
+  }, [search, filters.q]);
+
+  const replaceApp = (id: string, next: PipelineApplication) =>
+    setApplications((list) => list.map((a) => (a.id === id ? next : a)));
+
+  const patchApplication = async (id: string, patch: ApplicationPatch) => {
+    const before = appsRef.current.find((a) => a.id === id);
+    if (!before) return;
+    if (patch.stage !== undefined && !isStage(patch.stage)) return;
+    const optimistic: PipelineApplication = {
+      ...before,
+      ...patch,
+      ...(patch.stage && isStage(patch.stage) ? { status: statusForStage(patch.stage) } : {}),
+    };
+    replaceApp(id, optimistic);
+    try {
+      const saved = await api<PipelineApplication>(`/api/applications/${id}`, { method: "PATCH", body: patch });
+      // Keep the card in place; the server copy carries the recomputed fit and dates.
+      setApplications((list) => list.map((a) => (a.id === id ? (saved?.job ? { ...saved, people: a.people } : { ...a, ...patch }) : a)));
+      if (patch.stage !== undefined) loadStats();
     } catch (err) {
-      console.error("Error updating stage:", err);
+      setApplications((list) => list.map((a) => (a.id === id ? before : a)));
+      notify(`Couldn't update "${before.job.title}": ${errorMessage(err)}`);
     }
   };
 
-  const handleSaveNotes = async (id: string) => {
+  const deleteApplication = async (id: string) => {
+    const index = appsRef.current.findIndex((a) => a.id === id);
+    const removed = appsRef.current[index];
+    if (!removed) return;
+    setApplications((list) => list.filter((a) => a.id !== id));
     try {
-      const res = await fetch(`${API_BASE_URL}/api/applications/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes: editingNotes }),
-      });
-      if (res.ok) {
-        setSelectedApp(null);
-        await fetchApplications();
-      }
+      await api(`/api/applications/${id}`, { method: "DELETE" });
+      loadStats();
     } catch (err) {
-      console.error("Error saving notes:", err);
+      setApplications((list) => {
+        const copy = list.filter((a) => a.id !== id);
+        copy.splice(Math.min(index, copy.length), 0, removed);
+        return copy;
+      });
+      notify(`Couldn't remove "${removed.job.title}": ${errorMessage(err)}`);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to remove this tracked application?")) return;
+  /** After a contact is added/changed from a card, refresh people for that company only. */
+  const refreshPeople = async (companyKey: string) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/applications/${id}`, {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        if (selectedApp?.id === id) setSelectedApp(null);
-        await fetchApplications();
-      }
+      const res = await api<Record<string, CompanyPeople>>("/api/networking/by-company", { query: { keys: companyKey } });
+      const people = res[companyKey];
+      if (!people) return;
+      setApplications((list) =>
+        list.map((a) => (a.companyKey === companyKey ? { ...a, people: { ...a.people, ...people } } : a))
+      );
     } catch (err) {
-      console.error("Error deleting application:", err);
+      notify(`Couldn't refresh people: ${errorMessage(err)}`);
     }
   };
 
-  if (loading) {
+  const updateFilters = (patch: Partial<PipelineFilters>) => setFilters((f) => ({ ...f, ...patch }));
+  const filtersActive =
+    filters.q !== "" || filters.stages.length > 0 || filters.source !== "" || filters.hasAlumni;
+
+  if (initialLoading) {
     return (
-      <div className="flex justify-center items-center py-24">
+      <div className="flex justify-center items-center py-24" role="status" aria-label="Loading applications">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+    <div className="space-y-4">
+      <div className="flex flex-wrap justify-between items-center gap-3 bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
         <div>
-          <h2 className="text-xl font-bold text-slate-900">Application Pipeline Tracker</h2>
+          <h2 className="text-xl font-bold text-slate-900">Application Pipeline</h2>
           <p className="text-sm text-slate-500 mt-1">
-            Track your internship submissions across stages with complete audit history and human-in-the-loop oversight.
+            Every job you&rsquo;re pursuing, ranked by fit, with the people who can refer you.
           </p>
         </div>
-        <button
-          onClick={fetchApplications}
-          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm transition-colors"
-        >
-          ↻ Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          {refreshing && <span className="text-xs text-slate-400" role="status">Updating…</span>}
+          <button
+            type="button"
+            onClick={reload}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm transition-colors"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
-      {error && (
-        <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-sm">
-          {error}
+      <Toolbar filters={filters} search={search} onSearch={setSearch} onChange={updateFilters} stats={stats} view={view} onView={setView} />
+
+      {loadError && (
+        <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-sm flex justify-between gap-3" role="alert">
+          <span>Couldn&rsquo;t load applications: {loadError}</span>
+          <button type="button" onClick={reload} className="font-semibold underline">
+            Retry
+          </button>
         </div>
       )}
 
-      {applications.length === 0 ? (
-        <div className="bg-white p-12 text-center rounded-2xl border border-slate-100 shadow-sm">
-          <div className="text-4xl mb-3">📋</div>
-          <h3 className="text-lg font-bold text-slate-800">No Applications Tracked Yet</h3>
-          <p className="text-sm text-slate-500 max-w-md mx-auto mt-2">
-            Switch to the Job Feed tab, select an internship match, and click &ldquo;Bookmark to Pipeline&rdquo; or &ldquo;Prepare Application&rdquo;.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {applications.map((app) => {
-            const stageConfig = STAGES.find((s) => s.key === app.stage) || STAGES[0];
-            return (
-              <div
-                key={app.id}
-                className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex justify-between items-start gap-2 mb-3">
-                    <span
-                      className={`px-3 py-1 text-xs font-bold rounded-full border ${stageConfig.badge}`}
-                    >
-                      {stageConfig.label}
-                    </span>
-                    <button
-                      onClick={() => handleDelete(app.id)}
-                      className="text-slate-400 hover:text-rose-600 text-sm"
-                      title="Remove from pipeline"
-                    >
-                      ×
-                    </button>
-                  </div>
-
-                  <h3 className="font-bold text-slate-900 text-base leading-snug">
-                    {app.jobListing?.title || "Role Title"}
-                  </h3>
-                  <p className="text-sm font-medium text-slate-600 mt-1">
-                    {app.jobListing?.company || "Company"} • {app.jobListing?.location || "Location"}
-                  </p>
-
-                  {app.jobListing?.url && (
-                    <a
-                      href={app.jobListing.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center text-xs font-semibold text-indigo-600 hover:text-indigo-800 mt-2"
-                    >
-                      View Job Listing ↗
-                    </a>
-                  )}
-
-                  {app.notes && (
-                    <div className="mt-3 p-3 bg-slate-50 rounded-xl text-xs text-slate-600 border border-slate-100">
-                      <strong>Notes:</strong> {app.notes}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-6 pt-4 border-t border-slate-100 space-y-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">Move Stage:</label>
-                    <select
-                      value={app.stage}
-                      onChange={(e) => handleUpdateStage(app.id, e.target.value)}
-                      className="w-full text-xs font-semibold bg-slate-50 border border-slate-200 rounded-lg p-2 text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      {STAGES.map((st) => (
-                        <option key={st.key} value={st.key}>
-                          {st.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      setSelectedApp(app);
-                      setEditingNotes(app.notes || "");
-                    }}
-                    className="w-full py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors text-center"
-                  >
-                    ✏ Edit Notes
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {selectedApp && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex justify-center items-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100">
-            <h3 className="text-lg font-bold text-slate-900 mb-2">Edit Application Notes</h3>
-            <p className="text-xs text-slate-500 mb-4">
-              {selectedApp.jobListing?.title} at {selectedApp.jobListing?.company}
-            </p>
-
-            <textarea
-              value={editingNotes}
-              onChange={(e) => setEditingNotes(e.target.value)}
-              placeholder="Add recruiter contact, interview questions, or follow-up dates..."
-              className="w-full h-32 p-3 text-sm bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 resize-none text-slate-800"
-            />
-
-            <div className="flex justify-end gap-3 mt-4">
-              <button
-                onClick={() => setSelectedApp(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleSaveNotes(selectedApp.id)}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm shadow-md"
-              >
-                Save Notes
-              </button>
-            </div>
+      {applications.length === 0 && !loadError ? (
+        filtersActive ? (
+          <div className="bg-white p-10 text-center rounded-2xl border border-slate-100 shadow-sm">
+            <h3 className="text-base font-bold text-slate-800">No applications match these filters</h3>
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setFilters((f) => ({ ...DEFAULT_FILTERS, sort: f.sort }));
+              }}
+              className="mt-3 px-3 py-1.5 text-sm font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
+            >
+              Clear filters
+            </button>
           </div>
+        ) : (
+          <div className="bg-white p-12 text-center rounded-2xl border border-slate-100 shadow-sm">
+            <h3 className="text-lg font-bold text-slate-800">No Applications Tracked Yet</h3>
+            <p className="text-sm text-slate-500 max-w-md mx-auto mt-2">
+              Open Job Discovery, pick a listing and use &ldquo;Save to Pipeline&rdquo;. Wellfound runs and Gmail updates show up here too.
+            </p>
+          </div>
+        )
+      ) : view === "kanban" ? (
+        <KanbanBoard
+          applications={applications}
+          stages={filters.stages}
+          onPatch={patchApplication}
+          onDelete={deleteApplication}
+          onPeopleChanged={refreshPeople}
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {applications.map((app) => (
+            <ApplicationCard key={app.id} app={app} onPatch={patchApplication} onDelete={deleteApplication} onPeopleChanged={refreshPeople} />
+          ))}
         </div>
       )}
+
+      <Toasts toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </div>
   );
 }
