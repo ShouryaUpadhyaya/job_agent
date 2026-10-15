@@ -1,0 +1,26 @@
+{
+  "_comment": "Resume facts used when the database profile leaves a field empty. Only facts from the resume; edit them in the UI (Wellfound > Profile & Rules), which saves to the database.",
+  "name": "Shourya Upadhyaya",
+  "currentRole": "a 3rd-year B.Tech Computer Science student at VIT Vellore, previously Lead Full-Stack Developer at Moss X",
+  "company": "VIT Vellore (student)",
+  "school": "Vellore Institute of Technology (VIT), Vellore",
+  "education": "B.Tech in Computer Science and Engineering, Vellore Institute of Technology (VIT), Vellore, 2024-2028 (currently in 3rd year)",
+  "yearsOfExperience": "about one year of industry experience across two roles: Frontend Developer at Nepbyte Technology (Sept 2024 - Feb 2025) and Lead Full-Stack Developer at Moss X (Apr - Oct 2025)",
+  "skills": [
+    "JavaScript", "TypeScript", "Python", "Java", "SQL", "C++", "DSA", "OOP", "System Design",
+    "Node.js", "Express", "Prisma", "REST APIs", "PostgreSQL", "MongoDB", "Redis",
+    "React", "Next.js", "Tailwind CSS", "Zustand",
+    "Docker", "Nginx", "Git", "Linux", "Prometheus", "Grafana", "Render"
+  ],
+  "highlights": [
+    "Built OpenPumTa (openpumta.com), a productivity platform with Express, Prisma and PostgreSQL: 30+ REST APIs, Google OAuth with JWT and Zod validation, Redis and WebSockets, deployed with Docker Compose on a VPS behind Nginx and monitored with Prometheus and Grafana, with 1,500+ visitors",
+    "As Lead Full-Stack Developer at Moss X (Apr - Oct 2025) I built a Node.js, Express and MongoDB e-commerce backend with JWT auth, Redis caching that kept responses under 50 ms, and idempotent Razorpay webhooks, led a team of 3 developers and shipped with Docker on Render",
+    "As Frontend Developer at Nepbyte Technology (Sept 2024 - Feb 2025) I built React frontends with Axios and Zustand and improved Lighthouse scores by 40%",
+    "Built Cook Off 10.0, a Next.js coding-contest platform with a CodeMirror 6 editor used by 1,000+ users"
+  ],
+  "github": "https://github.com/ShouryaUpadhyaya",
+  "linkedin": "https://www.linkedin.com/in/shourya-upadhyaya-998535332",
+  "x": "https://x.com/Shourya60756648",
+  "portfolio": "https://shouryaupadhyaya.com",
+  "gender": ""
+}

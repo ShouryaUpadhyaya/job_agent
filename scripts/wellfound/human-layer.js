@@ -208,16 +208,20 @@ async function ensureFeed() {
 }
 
 // ---------- Gemini ----------
-// ---------- Gemini ----------
-const GEMINI_MODELS = ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+// Under the Playwright runner the key never enters the page: window.__aaGemini is a binding that
+// calls Gemini from Node. The pasted Zen bundle only has a key if it was built with --with-key.
+const GEMINI_MODELS = ['gemini-flash-lite-latest', 'gemini-flash-latest'];
 async function geminiText(prompt) {
+  if (typeof window.__aaGemini === 'function') {
+    try { return String((await window.__aaGemini(prompt)) || ''); } catch (e) { log(`  ⚠ Gemini (runner) failed: ${e.message}`); return ''; }
+  }
   const key = CONFIG.geminiKey;
   if (!key) return '';
   for (let attempt = 0; attempt < 3; attempt++) {
     for (const model of GEMINI_MODELS) {
       try {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
           body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
         });
         const data = await res.json();

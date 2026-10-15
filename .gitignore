@@ -51,8 +51,12 @@ scripts/wellfound/out/
 /applications.csv
 /apply-state-wellfound.json
 .wellfound-chrome-profile/
-logs/
-diagnostics/
+# Wellfound run logs and diagnostics (screenshots/HTML of your account); dirs kept so Docker
+# bind mounts don't create them as root
+/logs/*
+!/logs/.gitkeep
+/diagnostics/*
+!/diagnostics/.gitkeep
 
 # Personal notes
 to_add.txt
