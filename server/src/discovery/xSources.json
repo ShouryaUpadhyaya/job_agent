@@ -1,0 +1,34 @@
+{
+  "checkedAt": "2026-10-15",
+  "note": "X profiles could not be fetched directly (X returns a login/paywall to automated clients). Each account below was found via web search listings of its X profile; activity and quality were not independently confirmed. Check recent posts before relying on an account. Never invented: if an account disappears, remove it.",
+  "searchUrl": "https://x.com/search?q=(internship%20OR%20intern)%20(hiring%20OR%20apply)%20(2027%20OR%202028%20OR%20%223rd%20year%22)%20india%20min_faves%3A20&f=live",
+  "accounts": [
+    {
+      "handle": "fjafreshers",
+      "name": "Freshers IT Jobs Updates",
+      "url": "https://x.com/fjafreshers",
+      "posts": "Frequent fresher/graduate openings at large IT employers in India (company, role, eligibility, location).",
+      "evidence": "Profile listed by web search for 'X accounts to follow for tech internships and fresher jobs India' (search result description of the profile).",
+      "evidenceUrl": "https://x.com/fjafreshers",
+      "confidence": "search-listing-only"
+    },
+    {
+      "handle": "Fresherflow",
+      "name": "FresherFlow",
+      "url": "https://x.com/Fresherflow",
+      "posts": "Self-described: verified jobs, internships and walk-in drives for students and fresh graduates across India.",
+      "evidence": "Profile listed by web search for 'X accounts to follow for tech internships and fresher jobs India' (search result description of the profile).",
+      "evidenceUrl": "https://x.com/Fresherflow",
+      "confidence": "search-listing-only"
+    },
+    {
+      "handle": "fresherscampus",
+      "name": "Freshers Tech",
+      "url": "https://x.com/fresherscampus",
+      "posts": "Off-campus fresher openings and internships (search snippets showed a Deloitte 2026 fresher drive and a Qualcomm internship post); posting frequency looked sparse.",
+      "evidence": "Profile listed by web search for off-campus fresher hiring X handles; bio links fresherstech.com.",
+      "evidenceUrl": "https://twitter.com/fresherscampus",
+      "confidence": "search-listing-only"
+    }
+  ]
+}
