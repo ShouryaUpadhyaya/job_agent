@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { allowedOrigins, originGuard } from './lib/origin';
 import dotenv from 'dotenv';
 import path from 'path';
 
@@ -20,7 +21,8 @@ import { briefingRouter } from './api/briefing';
 import { wellfoundAutoApplyRouter } from './api/wellfound';
 
 const app = express();
-app.use(cors());
+app.use(originGuard());
+app.use(cors({ origin: allowedOrigins() }));
 app.use(express.json());
 
 app.get('/health', async (req, res) => {
