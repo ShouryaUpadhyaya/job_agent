@@ -82,7 +82,8 @@ function buildConsoleScript({ live = false, max = 10, dailyCap = lib.DEFAULT_DAI
       }`);
 
   // company from the job's own startup card (never the global page banner)
-  patch("const company = (row.querySelector('img[alt*=\"logo\" i]')?.alt || '')\n        .replace(/company logo/i, '').trim();", `let company = ((a.closest('[data-test="StartupResult"]') || row).querySelector('a[href^="/company/"] h2, a[href^="/company/"]')?.textContent || row.querySelector('img[alt*="logo" i]')?.alt || '').replace(/company logo|actively hiring|promoted|\\d+-\\d+ employees|employees/gi, ' ').replace(/\\s+/g, ' ').trim();`);
+  patch("const company = (row.querySelector('img[alt*=\"logo\" i]')?.alt || '')\n        .replace(/company logo/i, '').trim();", `const _card = a.closest('[data-test="StartupResult"]') || row;
+      let company = (_card.querySelector('a[href^="/company/"] h2')?.textContent || _card.querySelector('a[href^="/company/"] h3')?.textContent || row.querySelector('img[alt*="logo" i]')?.alt?.replace(/ ?logo$/i, '') || _card.querySelector('a[href^="/company/"]')?.textContent || '').replace(/company logo|actively hiring|promoted|\\d+-\\d+ employees|employees/gi, ' ').replace(/\\s+/g, ' ').trim();`);
 
   patch("const el =\n      document.querySelector('a[href^=\"/company/\"] h2') ||\n      document.querySelector('[data-test=\"StartupHeader\"] h1') ||\n      document.querySelector('a[href^=\"/company/\"]');", `const _titleMatch = document.title.match(/ at (.+?) • /i) || document.title.match(/ at (.+?) \\|/i);
     const _modal = document.querySelector('[data-test="JobListingSlideIn"], [role="dialog"]') || document;

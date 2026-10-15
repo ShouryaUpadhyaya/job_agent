@@ -38,7 +38,6 @@ const DIAG_DIR = path.resolve(opt('diagnostics-dir') || path.join(lib.DIAGNOSTIC
 const LOG_FILE = opt('log-file') ? path.resolve(opt('log-file')) : null;
 const PROFILE_DIR = path.resolve(opt('profile-dir') || lib.PROFILE_DIR);
 const MAX = opt('max') !== undefined ? Math.max(0, parseInt(opt('max'), 10) || 0) : null;
-const MAX_RUNTIME_MS = (parseInt(opt('max-minutes'), 10) || 100) * 60 * 1000;
 const IDLE_ROTATE_MS = 4 * 60 * 1000;
 const SEARCHES = ['https://wellfound.com/jobs'];
 const LOGIN_URL = 'https://wellfound.com/login';
@@ -235,6 +234,7 @@ function refreshToday() {
     return finish('FAILED', 2, { error: 'bad config' });
   }
   DAILY_CAP = Math.max(1, parseInt(opt('daily-cap'), 10) || Number(cfg.rules.dailyCap) || lib.DEFAULT_DAILY_CAP);
+  const MAX_RUNTIME_MS = (parseInt(opt('max-minutes'), 10) || Number(cfg.rules.maxRuntimeMinutes) || 100) * 60 * 1000;
 
   const chromium = loadPlaywright();
   if (!chromium) {
@@ -310,6 +310,9 @@ function refreshToday() {
   let lastActivity = Date.now();
   let searchIdx = 0;
   let pendingJob = null;
+  let exhausted = 0; // times the page script ran out of matching jobs since the last application
+  let reloadedFeed = false;
+  let sessionVerified = false; // nothing is injected until the logged-in check passes
   const skillVocab = String(cfg.CV.skills || '').split(',').map((s) => s.trim()).filter(Boolean);
   const matchSkills = (t) => { const l = ` ${String(t).toLowerCase()} `; return skillVocab.filter((s) => l.includes(s.toLowerCase())).join('; '); };
 
@@ -390,7 +393,11 @@ function refreshToday() {
         }, 2000);
       }
 
+      if (/All search pages exhausted/.test(clean)) exhausted++;
+
       if (SUBMITTED_RE.test(clean)) {
+        exhausted = 0;
+        reloadedFeed = false;
         stats.submitted++;
         if (LIVE) {
           refreshToday();
@@ -403,7 +410,7 @@ function refreshToday() {
       }
     });
     page.on('load', async () => {
-      if (!/wellfound\.com/.test(page.url())) return;
+      if (!sessionVerified || !/wellfound\.com/.test(page.url())) return;
       lastActivity = Date.now();
       await inject(page); // navigation mid-run is normal
     });
@@ -425,11 +432,14 @@ function refreshToday() {
     const body = (document.body && document.body.innerText) || '';
     const jobLinks = [...document.querySelectorAll('a[href*="/jobs/"]')].filter((a) => /\/jobs\/\d/.test(a.getAttribute('href') || '')).length;
     const password = !!document.querySelector('input[type="password"]');
-    return { path: location.pathname, body: body.slice(0, 4000), jobLinks, password };
-  }).catch(() => ({ path: '', body: '', jobLinks: 0, password: false }));
-  const botCheck = /verify you are human|are you a robot|captcha|access (is )?denied|unusual activity/i.test(state.body);
+    // Logged-in nav links to your applications/profile; the public (logged-out) /jobs feed shows Log in / Sign up instead.
+    const loggedIn = !!document.querySelector('a[href^="/jobs/applications"], a[href^="/profile/edit"], a[href^="/jobs/messages"]');
+    const loginLinks = !!document.querySelector('a[href="/login"], a[href^="/login?"], a[href*="/jobs/signup"], a[href*="/join"]');
+    return { path: location.pathname, body: body.slice(0, 4000), jobLinks, password, loggedIn, loginLinks };
+  }).catch(() => ({ path: '', body: '', jobLinks: 0, password: false, loggedIn: false, loginLinks: false }));
+  const botCheck = !state.loggedIn && /verify you are human|are you a robot|captcha|access (is )?denied|unusual activity/i.test(state.body);
   const loggedOut = /^\/(login|join|signup|users\/sign_in)/.test(state.path) || state.password ||
-    (state.jobLinks === 0 && /\b(log ?in|sign ?in|sign ?up|create an account)\b/i.test(state.body) && !/\b(log ?out|sign ?out)\b/i.test(state.body));
+    (!state.loggedIn && (state.loginLinks || state.jobLinks === 0));
   if (botCheck || loggedOut) {
     const reason = botCheck ? 'bot-check' : 'logged-out';
     await capture(mainPage, reason, { path: state.path, jobLinks: state.jobLinks });
@@ -438,7 +448,8 @@ function refreshToday() {
       : 'Wellfound session is logged out. Fix: npm run wellfound:login (log in in the window that opens, then close it), then start a dry run again.');
     return finish('FAILED', 3, { reason, error: botCheck ? 'bot check shown' : 'logged out' });
   }
-  log(`Session OK: ${state.jobLinks} job links on ${state.path}.`);
+  log(`Session OK (logged in): ${state.jobLinks} job links on ${state.path}.`);
+  sessionVerified = true;
   await inject(mainPage);
 
   // Supervisor: re-inject when idle, close stray tabs, stop on target/time/idle.
@@ -455,6 +466,14 @@ function refreshToday() {
       else if (p !== mainPage) await p.close().catch(() => {});
     }
     if (anyBusy) continue;
+    if (exhausted > 0) {
+      if (reloadedFeed) { log('No more matching jobs in the feed right now (checked again after a reload).'); break; }
+      log('Feed exhausted; reloading it once for fresh jobs.');
+      reloadedFeed = true;
+      exhausted = 0;
+      await mainPage.goto(SEARCHES[searchIdx], { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+      continue;
+    }
     if (Date.now() - lastActivity > IDLE_ROTATE_MS) {
       searchIdx++;
       if (searchIdx >= SEARCHES.length) { log('No more matching jobs right now (all searches exhausted).'); break; }

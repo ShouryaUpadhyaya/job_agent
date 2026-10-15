@@ -171,8 +171,11 @@ const bumpDaily = () => { if (!CONFIG.DRY_RUN) localStorage.setItem(__dayKey(), 
 async function ensureFeed() {
   const dialogs = [...document.querySelectorAll('[role="dialog"], [class*="modal" i], [data-test="DiscoverModal"]')].filter(visible);
   for (const dlg of dialogs) {
-    if (/ai interview|congrats|submitted/i.test(dlg.textContent)) {
-      const saveBtn = [...dlg.querySelectorAll('button')].find((b) => /^save$/i.test(b.textContent.trim()) && visible(b));
+    // Only the real post-submit dialog (short, specific wording). A job overlay can mention "AI interview"
+    // in its description, and its "Save" button bookmarks the job — never click that, and never in a dry run.
+    const postSubmit = dlg.textContent.length < 2500 && /application has been submitted|ai interview is being shared|congrats/i.test(dlg.textContent);
+    if (postSubmit) {
+      const saveBtn = CONFIG.DRY_RUN ? null : [...dlg.querySelectorAll('button')].find((b) => /^save$/i.test(b.textContent.trim()) && visible(b));
       if (saveBtn) {
         log('↩ closing post-submit AI interview modal with Save');
         await humanClick(saveBtn);
