@@ -37,6 +37,13 @@ services:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-job_agent}?schema=public"
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       GEMINI_KEY: ${GEMINI_KEY:-}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_REDIRECT_URI: ${GMAIL_REDIRECT_URI:-http://localhost:3001/api/gmail/oauth2callback}
+      GMAIL_INITIAL_LOOKBACK_DAYS: ${GMAIL_INITIAL_LOOKBACK_DAYS:-60}
+      GMAIL_SYNC_MAX_MESSAGES: ${GMAIL_SYNC_MAX_MESSAGES:-150}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-60}
       DISABLE_SCHEDULER: ${DISABLE_SCHEDULER:-false}
       TZ: Asia/Kolkata
       # The container has no Chrome/display: Wellfound runs go to the host agent
