@@ -143,13 +143,17 @@ The dashboard (`http://localhost:3000`) has seven tabs. The active tab is kept i
 - Read-only Gmail access (OAuth). Setup is below.
 - **Sync** is incremental and idempotent: a curated query (ATS and job-site senders plus job
   subject phrases), oldest first, skipping messages already stored. The first sync looks back
-  `GMAIL_INITIAL_LOOKBACK_DAYS`; each run processes at most `GMAIL_SYNC_MAX_MESSAGES`.
+  `GMAIL_INITIAL_LOOKBACK_DAYS`; each run processes at most `GMAIL_SYNC_MAX_MESSAGES`. Besides
+  **Sync now**, the scheduler syncs the inbox on every tick while Gmail is connected
+  (`GMAIL_AUTO_SYNC=false` turns that off). Only one sync runs at a time.
 - **Classification** into 12 classes (application confirmation, assessment, interview,
   rejection, offer, recruiter outreach, referral response, LinkedIn connection accepted,
   follow-up required, job alert, unrelated, unknown), with ATS awareness (the company comes from
   the subject/body, not from `greenhouse-mail.io`), deadlines and importance. Low-confidence
   emails get an optional Gemini second opinion.
-- **Effects:** confirmations create or advance applications; interviews, rejections and offers
+- **Effects:** confirmations create or advance applications (a confirmation for a job not in
+  Job Agent creates a placeholder listing that only appears in the pipeline, never in
+  Discovery); interviews, rejections and offers
   move stages forward only (and only at high confidence); assessments add a dated note;
   LinkedIn "accepted" emails update the matching contact; recruiter replies from real people
   become contacts; job alerts become listings in Discovery.
@@ -285,8 +289,9 @@ All variables live in the root `.env` (see `.env.example`). Everything is option
 | `GMAIL_INITIAL_LOOKBACK_DAYS` | `60` | How far back the first sync looks. Later syncs are incremental. |
 | `GMAIL_SYNC_MAX_MESSAGES` | `150` | Most messages processed per sync; the rest wait for the next run. |
 | `GITHUB_TOKEN` | — | Optional personal access token (no scopes needed) to raise the GitHub API rate limit for people discovery. |
-| `SYNC_INTERVAL_MINUTES` | `60` | Interval of the background job sync (followed by liveness checks and the Wellfound CSV import). |
-| `DISABLE_SCHEDULER` | `false` | `true` disables the background sync and the briefing trigger. |
+| `GMAIL_AUTO_SYNC` | `true` | Sync Gmail on each scheduler tick when connected. `false` means manual sync only. |
+| `SYNC_INTERVAL_MINUTES` | `60` | Scheduler interval. Each tick runs the job sync, then liveness checks, the Wellfound CSV import and the Gmail sync. |
+| `DISABLE_SCHEDULER` | `false` | `true` disables the scheduler entirely (job/Gmail sync, liveness, CSV import and the briefing trigger). |
 | `WELLFOUND_EXECUTOR` | `auto` | `local` spawns the runner in the server process, `agent` proxies to the host agent, `auto` uses local when Chrome is found, else the agent if `WELLFOUND_AGENT_URL` is set. Docker Compose sets `agent`. |
 | `WELLFOUND_AGENT_URL` | — (Compose: `http://host.docker.internal:3002`) | Host agent URL. |
 | `WELLFOUND_AGENT_TOKEN` | — | Shared secret between server and agent. Required for `wellfound:agent:docker`. Generate with `openssl rand -hex 24`. |
