@@ -87,10 +87,13 @@ gmailRouter.get('/gmail/events', async (req: Request, res: Response) => {
     }
     if (q.linked === 'linked') and.push({ OR: [{ jobApplicationId: { not: null } }, { networkingContactId: { not: null } }] });
     if (q.linked === 'unlinked') and.push({ jobApplicationId: null, networkingContactId: null });
+    // Deep link: one event by id (demo or not).
+    const byId = typeof q.id === 'string' && q.id.trim() ? q.id.trim() : null;
+    if (byId) where.id = byId;
     if (typeof q.company === 'string' && q.company.trim()) where.company = { contains: q.company.trim(), mode: 'insensitive' };
     const demo = typeof q.demo === 'string' ? q.demo : q.includeDemo === 'true' ? 'include' : 'exclude';
     if (demo === 'only') where.isDemo = true;
-    else if (demo !== 'include') where.isDemo = false;
+    else if (demo !== 'include' && !byId) where.isDemo = false;
     if (and.length) where.AND = and;
 
     const parsed = parseInt(String(q.limit ?? ''), 10);

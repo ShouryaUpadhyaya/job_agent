@@ -467,6 +467,8 @@ describe('demo, events and summary', () => {
     expect(bad.body[0].body).toBeUndefined();
     expect((await request(app).get('/api/gmail/events?linked=linked')).body.map((e: any) => e.jobApplication?.id)).toEqual([a.id]);
     expect((await request(app).get('/api/gmail/events?linked=unlinked')).body.map((e: any) => e.messageId)).toEqual(['x2']);
+    const x2 = await prisma.emailEvent.findUnique({ where: { messageId: 'x2' } });
+    expect((await request(app).get(`/api/gmail/events?id=${x2!.id}`)).body.map((e: any) => e.messageId)).toEqual(['x2']);
     expect((await request(app).get('/api/gmail/events?importance=LOW')).body.map((e: any) => e.messageId)).toEqual(['x2']);
     expect((await request(app).get('/api/gmail/events?classification=REJECTION')).body).toHaveLength(1);
     expect((await request(app).get('/api/gmail/events?classification=NOPE')).status).toBe(400);
@@ -488,9 +490,9 @@ describe('demo, events and summary', () => {
     const s = (await request(app).get('/api/gmail/summary?days=7')).body;
     expect(s.totalEvents).toBe(3);
     expect(s.counts).toMatchObject({ INTERVIEW_INVITATION: 1, RECRUITER_OUTREACH: 1, JOB_ALERT: 1 });
-    expect(s.needsAction[0]).toMatchObject({ kind: 'INTERVIEW', deadline: 'within 48 hours', link: '?tab=PIPELINE' });
+    expect(s.needsAction[0]).toMatchObject({ kind: 'INTERVIEW', deadline: 'within 48 hours', link: `?tab=PIPELINE&id=${a.id}` });
     expect(s.needsAction[0].application.id).toBe(a.id);
-    expect(s.needsAction[1]).toMatchObject({ kind: 'RECRUITER_REPLY', link: '?tab=NETWORKING' });
+    expect(s.needsAction[1]).toMatchObject({ kind: 'RECRUITER_REPLY', link: `?tab=NETWORKING&id=${s.needsAction[1].contact.id}` });
     expect(s.statusChanges).toEqual([expect.objectContaining({ applicationId: a.id, from: 'APPLIED', to: 'INTERVIEWING' })]);
     expect(s.highlights.length).toBeGreaterThan(0);
     expect(s.aiSummary).toBeNull();

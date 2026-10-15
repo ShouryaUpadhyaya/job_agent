@@ -26,7 +26,7 @@ export interface NeedsActionItem {
   suggestedAction: string | null;
   application: { id: string; stage: string; title: string; company: string } | null;
   contact: { id: string; name: string; company: string; status: string } | null;
-  /** Dashboard deep link (`?tab=PIPELINE`, `?tab=NETWORKING` or `?tab=GMAIL`). */
+  /** Dashboard deep link (`?tab=PIPELINE&id=<application>`, `?tab=NETWORKING&id=<contact>` or `?tab=GMAIL&id=<event>`). */
   link: string;
 }
 
@@ -86,7 +86,7 @@ export async function buildGmailSummary(days = 7, now = new Date(), opts: { ai?:
       suggestedAction: e.suggestedAction,
       application: app ? { id: app.id, stage: app.stage, title: app.jobListing.title, company: app.jobListing.company } : null,
       contact: contact ? { id: contact.id, name: contact.name, company: contact.company, status: contact.status } : null,
-      link: app ? '?tab=PIPELINE' : contact ? '?tab=NETWORKING' : '?tab=GMAIL',
+      link: app ? `?tab=PIPELINE&id=${app.id}` : contact ? `?tab=NETWORKING&id=${contact.id}` : `?tab=GMAIL&id=${e.id}`,
     });
   }
   const rank: Record<NeedsActionKind, number> = { OFFER: 0, INTERVIEW: 1, ASSESSMENT: 2, RECRUITER_REPLY: 3, FOLLOW_UP: 4 };
