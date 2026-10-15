@@ -60,10 +60,14 @@ export default function JobDetail({ job, profile, onUserStatus, onPipelineChange
   const addToPipeline = async () => {
     try {
       setMessage(null);
-      await api("/api/applications", {
+      const res = await api<{ duplicate?: boolean }>("/api/applications", {
         body: { jobListingId: job.id, stage: "BOOKMARKED", notes: `Added from Job Discovery (${job.score} pts)` },
       });
-      setMessage(`✓ "${job.title}" added to the Application Pipeline.`);
+      setMessage(
+        res?.duplicate
+          ? `"${job.title}" is already in your Application Pipeline.`
+          : `✓ "${job.title}" added to the Application Pipeline.`
+      );
       onPipelineChanged();
     } catch (err) {
       setMessage(`✗ ${errorMessage(err)}`);
