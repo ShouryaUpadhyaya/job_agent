@@ -64,4 +64,17 @@ describe('Copilot API & Submission Enforcement', () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('SUBMITTED');
   });
+
+  it('generates an answer for screening questions via copilot API', async () => {
+    const res = await request(app)
+      .post('/api/copilot/generate-answer')
+      .send({
+        question: 'What experience do you have with backend microservices?',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.question).toBe('What experience do you have with backend microservices?');
+    expect(typeof res.body.answer).toBe('string');
+    expect(res.body.answer.length).toBeGreaterThan(10);
+  }, 20000);
 });

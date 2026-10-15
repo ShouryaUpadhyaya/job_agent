@@ -9,6 +9,19 @@ const server = app.listen(PORT, () => {
   // Automatically start background ingestion scheduler
   if (process.env.NODE_ENV !== 'test' && process.env.DISABLE_SCHEDULER !== 'true') {
     initScheduler();
+
+    // Auto-sync Wellfound applications from applications.csv on startup
+    (async () => {
+      try {
+        const { syncWellfoundApplicationsFromCsv } = await import('./connectors/wellfoundAutoApplyService');
+        const wfResult = await syncWellfoundApplicationsFromCsv();
+        if (wfResult.newImported > 0 || wfResult.alreadyTracked > 0) {
+          console.log(`[Startup] Wellfound sync: ${wfResult.newImported} new imported, ${wfResult.alreadyTracked} already tracked, ${wfResult.contactsCreated} networking contacts created.`);
+        }
+      } catch (err: any) {
+        console.warn(`[Startup] Wellfound initial sync skipped: ${err.message}`);
+      }
+    })();
   }
 });
 

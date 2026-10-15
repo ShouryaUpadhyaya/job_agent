@@ -1,9 +1,9 @@
-version: '3.8'
-
 services:
+  # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
     container_name: job_agent_db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -17,6 +17,60 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - job_agent_net
+
+  # Express Backend API & Ingestion Engine
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      network: host
+    container_name: job_agent_server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3001
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-job_agent}?schema=public"
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      GEMINI_KEY: ${GEMINI_KEY:-}
+      DISABLE_SCHEDULER: ${DISABLE_SCHEDULER:-false}
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./wellfound_autoApply:/app/wellfound_autoApply
+      - ./scripts:/app/scripts
+    networks:
+      - job_agent_net
+
+  # Next.js Frontend Dashboard
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      network: host
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    container_name: job_agent_web
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    ports:
+      - "3000:3000"
+    networks:
+      - job_agent_net
 
 volumes:
   postgres_data:
+    driver: local
+
+networks:
+  job_agent_net:
+    driver: bridge

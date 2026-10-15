@@ -1,0 +1,7 @@
+[submodule "wellfound_autoApply"]
+	path = wellfound_autoApply
+	url = https://github.com/ankitbaghel01/wellfound_autoApply.git
+	ignore = untracked
+[submodule "job-auto-apply"]
+	path = job-auto-apply
+	url = https://github.com/Anshul439/job-auto-apply.git

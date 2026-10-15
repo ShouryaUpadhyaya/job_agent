@@ -43,3 +43,16 @@ Thumbs.db
 *.docx
 *.doc
 
+
+# Generated scripts containing personal data
+scripts/wellfound/out/
+
+# Wellfound runtime data (personal; symlinks into wellfound_autoApply/)
+/applications.csv
+/apply-state-wellfound.json
+.wellfound-chrome-profile/
+logs/
+diagnostics/
+
+# Personal notes
+to_add.txt

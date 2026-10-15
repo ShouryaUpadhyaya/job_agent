@@ -8,6 +8,7 @@ import ProfileManager from "./ProfileManager";
 import NetworkingCrm from "./NetworkingCrm";
 import GmailSync from "./GmailSync";
 import DailyBriefing from "./DailyBriefing";
+import WellfoundAutoApplyManager from "./WellfoundAutoApplyManager";
 
 export type Job = {
   id: string;
@@ -29,7 +30,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<
-    "DISCOVERY" | "PIPELINE" | "NETWORKING" | "GMAIL" | "BRIEFING" | "SOURCES" | "PROFILE"
+    "DISCOVERY" | "WELLFOUND" | "PIPELINE" | "NETWORKING" | "GMAIL" | "BRIEFING" | "SOURCES" | "PROFILE"
   >("DISCOVERY");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
@@ -297,6 +298,19 @@ export default function Dashboard() {
             🎯 Job Discovery
           </button>
           <button
+            onClick={() => setActiveTab("WELLFOUND")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center space-x-1.5 ${
+              activeTab === "WELLFOUND"
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "text-slate-300 hover:text-white hover:bg-slate-800"
+            }`}
+          >
+            <span>⚡ Wellfound AutoApply</span>
+            <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] rounded-full">
+              Bot
+            </span>
+          </button>
+          <button
             onClick={() => setActiveTab("PIPELINE")}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
               activeTab === "PIPELINE"
@@ -360,6 +374,12 @@ export default function Dashboard() {
       </nav>
 
       {/* Main Tab Views */}
+      {activeTab === "WELLFOUND" && (
+        <div className="flex-1 overflow-y-auto p-8 max-w-7xl mx-auto w-full">
+          <WellfoundAutoApplyManager />
+        </div>
+      )}
+
       {activeTab === "PIPELINE" && (
         <div className="flex-1 overflow-y-auto p-8 max-w-7xl mx-auto w-full">
           <ApplicationsPipeline />

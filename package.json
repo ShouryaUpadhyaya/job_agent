@@ -13,6 +13,17 @@
     "test:server": "npm run test -w server",
     "test:web": "npm run test -w web",
     "build:server": "npm run build -w server",
-    "build:web": "npm run build -w web"
+    "build:web": "npm run build -w web",
+    "wellfound:install": "npm --prefix wellfound_autoApply install",
+    "wellfound:login": "node wellfound_autoApply/auto-apply-runner.js wellfound login",
+    "wellfound:dry-run": "node wellfound_autoApply/auto-apply-runner.js wellfound",
+    "wellfound:dry-run:visible": "node wellfound_autoApply/auto-apply-runner.js wellfound --visible",
+    "wellfound:live": "node wellfound_autoApply/auto-apply-runner.js wellfound --live",
+    "wellfound:live:visible": "node wellfound_autoApply/auto-apply-runner.js wellfound --live --visible",
+    "wellfound:zen": "node scripts/wellfound/build-wellfound-paste.js",
+    "wellfound:zen:live": "node scripts/wellfound/build-wellfound-paste.js --live",
+    "job-apply:install": "npm --prefix job-auto-apply install && npx --prefix job-auto-apply playwright install chromium",
+    "job-apply:wellfound": "npm --prefix job-auto-apply run start:wellfound",
+    "job-apply:instahyre": "npm --prefix job-auto-apply run start:instahyre"
   }
 }

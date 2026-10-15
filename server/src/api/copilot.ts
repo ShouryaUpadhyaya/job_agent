@@ -1,6 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db';
-import { tailorResume, tailorCoverLetter } from '../resumes/tailor';
+import { JobListing } from '@prisma/client';
+import {
+  tailorResume,
+  tailorCoverLetter,
+  tailorCoverLetterWithGemini,
+  generateAnswerWithGemini,
+} from '../resumes/tailor';
 
 export const copilotRouter = Router();
 
@@ -29,7 +35,7 @@ copilotRouter.post('/copilot/generate', async (req: Request, res: Response) => {
     }
 
     if (type === 'COVER_LETTER') {
-      const result = tailorCoverLetter(profile, job);
+      const result = await tailorCoverLetterWithGemini(profile, job);
       return res.status(200).json({ content: result.formattedMarkdown });
     } else if (type === 'RESUME') {
       const result = tailorResume(profile, job);
@@ -95,7 +101,7 @@ copilotRouter.post('/copilot/tailor-resume', async (req: Request, res: Response)
 
 // POST /api/copilot/tailor-cover-letter - Tailor cover letter for specific job listing
 copilotRouter.post('/copilot/tailor-cover-letter', async (req: Request, res: Response) => {
-  const { jobListingId, candidateProfileId } = req.body;
+  const { jobListingId, candidateProfileId, question, wordLimit } = req.body;
   if (!jobListingId) {
     return res.status(400).json({ error: 'jobListingId is required' });
   }
@@ -114,7 +120,7 @@ copilotRouter.post('/copilot/tailor-cover-letter', async (req: Request, res: Res
       return res.status(404).json({ error: 'Candidate profile not found' });
     }
 
-    const tailored = tailorCoverLetter(profile, job);
+    const tailored = await tailorCoverLetterWithGemini(profile, job, question, wordLimit);
 
     const doc = await prisma.document.create({
       data: {
@@ -141,6 +147,60 @@ copilotRouter.post('/copilot/tailor-cover-letter', async (req: Request, res: Res
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to tailor cover letter' });
+  }
+});
+
+// POST /api/copilot/generate-answer - Generate tailored answer to custom question
+copilotRouter.post('/copilot/generate-answer', async (req: Request, res: Response) => {
+  const { jobListingId, candidateProfileId, question, wordLimit } = req.body;
+  if (!question) {
+    return res.status(400).json({ error: 'question is required' });
+  }
+
+  try {
+    const foundJob = jobListingId
+      ? await prisma.jobListing.findUnique({ where: { id: jobListingId } })
+      : null;
+
+    if (!foundJob && jobListingId) {
+      return res.status(404).json({ error: 'Job listing not found' });
+    }
+
+    const job: JobListing = foundJob || {
+      id: 'generic',
+      externalId: 'generic',
+      source: 'manual',
+      title: 'Software Engineer',
+      company: 'Company',
+      description: 'Software Engineering position',
+      location: null,
+      status: 'APPLY',
+      score: 80,
+      matchReasons: [],
+      matchedSkills: [],
+      missingSkills: [],
+      url: '',
+      retrievedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    let profile = candidateProfileId
+      ? await prisma.candidateProfile.findUnique({ where: { id: candidateProfileId } })
+      : await prisma.candidateProfile.findFirst({ orderBy: { id: 'asc' } });
+
+    if (!profile) {
+      return res.status(404).json({ error: 'Candidate profile not found' });
+    }
+
+    const answer = await generateAnswerWithGemini(profile, job, question, wordLimit);
+
+    res.json({
+      question,
+      answer,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to generate answer' });
   }
 });
 
