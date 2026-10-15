@@ -1,120 +1,157 @@
 import { Router, Request, Response } from 'express';
-import { gmailService } from '../email/service';
+import { Prisma } from '@prisma/client';
+import { gmailService, GmailError } from '../email/service';
+import { buildGmailSummary, clampDays } from '../email/summary';
+import { classifyJobEmail, isClassification } from '../email/classifier';
 import { prisma } from '../db';
 
 export const gmailRouter = Router();
 
-// 1. Connection status
-gmailRouter.get('/gmail/status', async (req: Request, res: Response) => {
+function fail(res: Response, error: unknown) {
+  if (error instanceof GmailError) {
+    return res.status(error.httpStatus).json({ error: error.message, code: error.code, fix: error.fix });
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  console.error('[gmail]', message);
+  return res.status(500).json({ error: message });
+}
+
+const frontendUrl = () => (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+
+gmailRouter.get('/gmail/status', async (_req: Request, res: Response) => {
   try {
-    const status = await gmailService.getStatus();
-    res.json(status);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.json(await gmailService.getStatus());
+  } catch (error) {
+    fail(res, error);
   }
 });
 
-// 2. Generate Google OAuth URL
-gmailRouter.get('/gmail/auth-url', (req: Request, res: Response) => {
+gmailRouter.get('/gmail/auth-url', (_req: Request, res: Response) => {
   try {
-    const url = gmailService.getAuthUrl();
-    res.json({ url });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.json({ url: gmailService.getAuthUrl() });
+  } catch (error) {
+    fail(res, error);
   }
 });
 
-// 3. OAuth callback handler
 gmailRouter.get('/gmail/oauth2callback', async (req: Request, res: Response) => {
-  const code = req.query.code as string;
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-
-  if (!code) {
-    return res.redirect(`${frontendUrl}?tab=GMAIL&error=no_code`);
-  }
-
+  const back = (params: Record<string, string>) => {
+    const q = new URLSearchParams({ tab: 'GMAIL', ...params });
+    res.redirect(`${frontendUrl()}/?${q.toString()}`);
+  };
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  if (typeof req.query.error === 'string') return back({ auth: 'error', reason: req.query.error === 'access_denied' ? 'You declined access on the Google consent screen.' : req.query.error });
+  if (!code) return back({ auth: 'error', reason: 'Google did not return an authorization code.' });
   try {
-    await gmailService.handleOAuthCallback(code);
-    res.redirect(`${frontendUrl}?tab=GMAIL&auth=success`);
+    await gmailService.handleOAuthCallback(code, state);
+    back({ auth: 'success' });
   } catch (error: any) {
-    console.error('[GmailOAuth] Callback failed:', error);
-    res.redirect(`${frontendUrl}?tab=GMAIL&error=${encodeURIComponent(error.message)}`);
+    console.error('[gmail] OAuth callback failed:', error?.message);
+    back({ auth: 'error', reason: String(error?.message || 'Sign-in failed').slice(0, 200) });
   }
 });
 
-// 4. Trigger Mailbox Sync
-gmailRouter.post('/gmail/sync', async (req: Request, res: Response) => {
+gmailRouter.post('/gmail/sync', async (_req: Request, res: Response) => {
   try {
-    const result = await gmailService.syncInbox();
-    res.json(result);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.json(await gmailService.syncInbox());
+  } catch (error) {
+    fail(res, error);
   }
 });
 
-// 5. List Email Events
+gmailRouter.get('/gmail/summary', async (req: Request, res: Response) => {
+  try {
+    res.json(await buildGmailSummary(clampDays(req.query.days), new Date(), { ai: req.query.ai !== '0' }));
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+/**
+ * Events, newest first. Filters: classification, importance (HIGH|NORMAL|LOW),
+ * linked (linked|unlinked), company, demo (exclude [default] | include | only), limit (1-200).
+ */
 gmailRouter.get('/gmail/events', async (req: Request, res: Response) => {
   try {
-    const { classification, company, limit } = req.query;
-    const where: any = {};
-
-    if (classification && typeof classification === 'string') {
-      where.classification = classification;
+    const q = req.query;
+    const where: Prisma.EmailEventWhereInput = {};
+    const and: Prisma.EmailEventWhereInput[] = [];
+    if (typeof q.classification === 'string' && q.classification !== 'ALL') {
+      if (!isClassification(q.classification)) return res.status(400).json({ error: `Unknown classification ${q.classification}` });
+      where.classification = q.classification;
     }
-
-    if (company && typeof company === 'string') {
-      where.company = { contains: company, mode: 'insensitive' };
+    if (typeof q.importance === 'string' && q.importance !== 'ALL') {
+      if (!['HIGH', 'NORMAL', 'LOW'].includes(q.importance)) return res.status(400).json({ error: 'importance must be HIGH, NORMAL or LOW' });
+      where.importance = q.importance;
     }
+    if (q.linked === 'linked') and.push({ OR: [{ jobApplicationId: { not: null } }, { networkingContactId: { not: null } }] });
+    if (q.linked === 'unlinked') and.push({ jobApplicationId: null, networkingContactId: null });
+    if (typeof q.company === 'string' && q.company.trim()) where.company = { contains: q.company.trim(), mode: 'insensitive' };
+    const demo = typeof q.demo === 'string' ? q.demo : q.includeDemo === 'true' ? 'include' : 'exclude';
+    if (demo === 'only') where.isDemo = true;
+    else if (demo !== 'include') where.isDemo = false;
+    if (and.length) where.AND = and;
+
+    const parsed = parseInt(String(q.limit ?? ''), 10);
+    const take = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 200) : 50;
 
     const events = await prisma.emailEvent.findMany({
       where,
       orderBy: { receivedAt: 'desc' },
-      take: limit ? parseInt(limit as string, 10) : 50,
+      take,
       include: {
-        jobApplication: {
-          include: { jobListing: true },
-        },
-        networkingContact: true,
+        jobApplication: { select: { id: true, stage: true, jobListing: { select: { title: true, company: true } } } },
+        networkingContact: { select: { id: true, name: true, company: true, status: true } },
       },
     });
-
-    res.json(events);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    // The body is large and only used server-side; the list shows the snippet.
+    res.json(events.map(({ body: _body, ...rest }) => rest));
+  } catch (error) {
+    fail(res, error);
   }
 });
 
-// 6. Disconnect Account
-gmailRouter.post('/gmail/disconnect', async (req: Request, res: Response) => {
+gmailRouter.post('/gmail/disconnect', async (_req: Request, res: Response) => {
   try {
-    const result = await gmailService.disconnect();
-    res.json(result);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.json(await gmailService.disconnect());
+  } catch (error) {
+    fail(res, error);
   }
 });
 
-// 7. Simulate incoming email event (for testing & verification)
+/** Classifier preview: nothing is stored. */
+gmailRouter.post('/gmail/classify', (req: Request, res: Response) => {
+  const { sender, senderName, subject, body, snippet } = req.body || {};
+  if (!subject || typeof subject !== 'string') return res.status(400).json({ error: 'subject is required' });
+  res.json(classifyJobEmail({ subject, body: body || snippet || '', sender: sender || '', senderName }));
+});
+
+/** Stores a hand-written test email as a demo event (isDemo, no side effects). */
 gmailRouter.post('/gmail/simulate', async (req: Request, res: Response) => {
   try {
-    const { sender, senderName, subject, snippet, body } = req.body;
-    if (!subject || !sender) {
-      return res.status(400).json({ error: 'sender and subject are required' });
-    }
-
-    const messageId = `simulated-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const result = await gmailService.processEmail({
-      messageId,
-      sender,
-      senderName,
-      subject,
-      snippet,
-      body,
-      receivedAt: new Date(),
-    });
-
+    const { sender, senderName, subject, snippet, body } = req.body || {};
+    if (!subject || !sender) return res.status(400).json({ error: 'sender and subject are required' });
+    const messageId = `demo-sim-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const result = await gmailService.processEmail({ messageId, sender, senderName, subject, snippet, body, receivedAt: new Date() }, { isDemo: true });
     res.status(201).json(result);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+gmailRouter.post('/gmail/demo', async (_req: Request, res: Response) => {
+  try {
+    res.status(201).json(await gmailService.loadDemo());
+  } catch (error) {
+    fail(res, error);
+  }
+});
+
+gmailRouter.delete('/gmail/demo', async (_req: Request, res: Response) => {
+  try {
+    res.json(await gmailService.clearDemo());
+  } catch (error) {
+    fail(res, error);
   }
 });
