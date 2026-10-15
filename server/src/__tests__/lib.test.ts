@@ -101,3 +101,19 @@ describe('gemini helpers', () => {
     expect(toPlainText('**Hi**\n- one')).toBe('Hi\none');
   });
 });
+
+describe('listing text cleanup', () => {
+  it('decodes entities and strips ATS board suffixes from company names', async () => {
+    const { cleanJobPayload, cleanCompanyName } = await import('../jobs/normalization');
+    const cleaned = cleanJobPayload({
+      externalId: '1', source: 'greenhouse', title: 'Software Engineer Intern (Web &amp; Mobile)',
+      company: 'Rubrik Job Board', url: 'https://example.com/1', description: 'x', location: 'Jammu &amp; Kashmir',
+    });
+    expect(cleaned.title).toBe('Software Engineer Intern (Web & Mobile)');
+    expect(cleaned.company).toBe('Rubrik');
+    expect(cleaned.location).toBe('Jammu & Kashmir');
+    expect(cleanCompanyName('Acme Careers')).toBe('Acme');
+    expect(cleanCompanyName('Jobs')).toBe('Jobs');
+    expect(cleanCompanyName('Hiring Hub Labs')).toBe('Hiring Hub Labs');
+  });
+});

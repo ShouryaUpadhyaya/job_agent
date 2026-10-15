@@ -24,11 +24,11 @@ export interface IngestionResult {
 }
 
 export function cleanJobPayload(raw: Partial<RawJobPayload | JobListing> & { externalId: string; source: string; title: string; company: string; url: string; description: string }): RawJobListing {
-  const cleanTitle = (raw.title || '').trim();
-  const cleanCompany = (raw.company || '').trim();
+  const cleanTitle = inlineText(raw.title);
+  const cleanCompany = cleanCompanyName(inlineText(raw.company));
   const cleanUrl = canonicalizeUrl(raw.url || '');
   const cleanDesc = cleanHtml(raw.description || '');
-  const cleanLocation = raw.location ? (raw.location || '').trim() : null;
+  const cleanLocation = raw.location ? inlineText(raw.location) || null : null;
 
   return {
     externalId: String(raw.externalId).trim(),
@@ -53,6 +53,17 @@ export function cleanJobPayload(raw: Partial<RawJobPayload | JobListing> & { ext
       INTERNSHIP_RE.test(cleanTitle) ||
       INTERNSHIP_RE.test(((raw as any).tags || []).filter((t: string) => !String(t).startsWith('feed:')).join(' ')),
   };
+}
+
+/** Single-line fields: decode entities ("R&amp;D"), drop stray tags, collapse whitespace. */
+function inlineText(value: unknown): string {
+  return cleanHtml(String(value ?? '')).replace(/\s+/g, ' ').trim();
+}
+
+/** ATS boards often publish the board name ("Rubrik Job Board", "Acme Careers") as the company. */
+export function cleanCompanyName(name: string): string {
+  const stripped = name.replace(/\s*[-|–]?\s*\b(job board|careers?( page| site)?|jobs|hiring)\s*$/i, '').trim();
+  return stripped || name;
 }
 
 function toDate(value: unknown): Date | null {

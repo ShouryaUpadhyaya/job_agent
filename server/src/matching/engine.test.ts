@@ -180,6 +180,10 @@ describe('matchJob', () => {
     expect(matchJob(intern, job({ location: 'Remote (Ireland)' }), { now: NOW }).reasons).toContain('Remote (region-restricted)');
     expect(matchJob(intern, job({ location: 'Remote (Worldwide)' }), { now: NOW }).reasons).toContain('Remote-friendly');
     expect(matchJob(intern, job({ location: 'Remote / Hybrid' }), { now: NOW }).reasons).toContain('Remote-friendly');
+    expect(
+      matchJob(intern, job({ location: 'San Francisco, California / New York, New York (Remote)' }), { now: NOW }).reasons
+    ).toContain('Remote (region-restricted)');
+    expect(matchJob(intern, job({ location: 'Bengaluru (Remote)' }), { now: NOW }).reasons).toContain('Location: India');
   });
 
   it('decays with age', () => {

@@ -164,10 +164,15 @@ function locationAssessment(
   }
   if (isRemote) {
     if (!remoteOk && !preferred.some((p) => /remote/i.test(p))) return { points: 0 };
-    const qualifier = (loc.match(/\(([^)]+)\)/)?.[1] || loc)
-      .replace(/\b(remote|anywhere|work from home|wfh|hybrid|on-?site|first|friendly|optional|only|role|unspecified|distributed|time ?zones?|tz)\b/gi, '')
-      .replace(/[^a-z ]/gi, ' ')
-      .trim();
+    const strip = (text: string) =>
+      text
+        .replace(/\b(remote|anywhere|work from home|wfh|hybrid|on-?site|first|friendly|optional|only|role|unspecified|distributed|time ?zones?|tz)\b/gi, '')
+        .replace(/[^a-z ]/gi, ' ')
+        .trim();
+    // "Remote (US only)" → the bracket names the region; "San Francisco / New York (Remote)"
+    // → the bracket says nothing, so the cities outside it define where the role is open.
+    const bracket = loc.match(/\(([^)]+)\)/)?.[1];
+    const qualifier = (bracket && strip(bracket)) || strip(loc.replace(/\([^)]*\)/g, ' '));
     const openToIndia = !qualifier || /\b(india|apac|asia|worldwide|anywhere|global|international)\b/i.test(qualifier) ||
       (prefersIndia && INDIA_PLACES.some((place) => wordIn(qualifier, place)));
     if (REGION_RESTRICTED_REMOTE_RE.test(loc) || (!openToIndia && /[a-z]{3,}/i.test(qualifier))) {
