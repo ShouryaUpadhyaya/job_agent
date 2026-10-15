@@ -176,7 +176,8 @@ function locationAssessment(
     const openToIndia = !qualifier || /\b(india|apac|asia|worldwide|anywhere|global|international)\b/i.test(qualifier) ||
       (prefersIndia && INDIA_PLACES.some((place) => wordIn(qualifier, place)));
     if (REGION_RESTRICTED_REMOTE_RE.test(loc) || (!openToIndia && /[a-z]{3,}/i.test(qualifier))) {
-      return { points: 4, reason: 'Remote (region-restricted)', concern: `Remote role limited to: ${loc}` };
+      // Remote but only for another country's residents: as out of reach as an on-site role abroad.
+      return { points: prefersIndia ? -30 : 4, reason: 'Remote (region-restricted)', concern: `Remote role limited to: ${loc}` };
     }
     return { points: 12, reason: 'Remote-friendly' };
   }
@@ -330,7 +331,7 @@ export function matchJob(profile: MatchProfile, job: MatchJobInput, options: Mat
   if (disqualifications.length) {
     classification = 'SKIP';
   } else if (score >= THRESHOLDS.APPLY) {
-    const blocking = eligibilityConcerns.some((c) => /cohort mismatch|years of experience|outside your preferences/i.test(c));
+    const blocking = eligibilityConcerns.some((c) => /cohort mismatch|years of experience|outside your preferences|remote role limited to/i.test(c));
     classification = blocking || (eligibilityConcerns.length > 0 && !internTitle) ? 'REVIEW' : 'APPLY';
   } else if (score >= THRESHOLDS.REVIEW) {
     classification = 'REVIEW';

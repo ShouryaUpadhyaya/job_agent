@@ -168,6 +168,9 @@ describe('matchJob', () => {
     const paris = matchJob(intern, job({ location: 'Paris, France' }), { now: NOW });
     expect(india.score - paris.score).toBeGreaterThanOrEqual(40);
     expect(paris.classification).not.toBe('APPLY');
+    const usOnly = matchJob(intern, job({ location: 'San Francisco, California / New York, New York (Remote)' }), { now: NOW });
+    expect(india.score - usOnly.score).toBeGreaterThanOrEqual(40);
+    expect(usOnly.classification).not.toBe('APPLY');
   });
 
   it('does not boost non-engineering internships', () => {
