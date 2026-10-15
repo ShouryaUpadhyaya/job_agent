@@ -69,8 +69,8 @@ describe('Enhanced Matching Engine with Eligibility and Constraints', () => {
     };
 
     const result = matchJob(internProfile, job);
-    expect(result.missingSkills).toContain('c++');
-    expect(result.missingSkills).toContain('kubernetes');
+    expect(result.missingSkills).toContain('C++');
+    expect(result.missingSkills).toContain('Kubernetes');
     expect(result.matchedSkills).toContain('Docker');
   });
 
