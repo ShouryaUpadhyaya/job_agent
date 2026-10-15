@@ -1,149 +1,183 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db';
+import { companyKey } from '../lib/company';
+import { ensureActiveProfile } from '../lib/profile';
+import { STAGES, Stage, isStage, statusForStage } from '../lib/stages';
+import {
+  APPLICATION_SOURCES,
+  applicationStats,
+  getApplicationDto,
+  listApplications,
+} from '../applications/service';
 
 export const applicationsRouter = Router();
 
-// GET /api/applications - List all applications
+const NOTES_MAX = 5000;
+
+function cleanNotes(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).slice(0, NOTES_MAX);
+  return s.trim() ? s : null;
+}
+
+/**
+ * GET /api/applications — pipeline list.
+ * Query: stage (csv), status (csv), source (csv), q (title/company/notes), hasAlumni=true,
+ * sort = fit (default) | match | alumni | recent | applied | company.
+ */
 applicationsRouter.get('/applications', async (req: Request, res: Response) => {
   try {
-    const { stage, status } = req.query;
-
-    const where: any = {};
-    if (stage) where.stage = String(stage);
-    if (status) where.status = String(status);
-
-    const applications = await prisma.jobApplication.findMany({
-      where,
-      include: {
-        jobListing: true,
-        candidateProfile: true,
-        documents: {
-          orderBy: { createdAt: 'desc' },
-        },
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
-    res.json(applications);
-  } catch (error: any) {
+    res.json(await listApplications(req.query));
+  } catch (error) {
     console.error('Error fetching applications:', error);
     res.status(500).json({ error: 'Failed to fetch applications' });
   }
 });
 
-// GET /api/applications/:id - Get single application
+/** GET /api/applications/stats — counts per stage and source. */
+applicationsRouter.get('/applications/stats', async (_req: Request, res: Response) => {
+  try {
+    res.json(await applicationStats());
+  } catch (error) {
+    console.error('Error fetching application stats:', error);
+    res.status(500).json({ error: 'Failed to fetch application stats' });
+  }
+});
+
 applicationsRouter.get('/applications/:id', async (req: Request, res: Response) => {
   try {
-    const id = String(req.params.id);
-    const application = await prisma.jobApplication.findUnique({
-      where: { id },
-      include: {
-        jobListing: true,
-        candidateProfile: true,
-        documents: {
-          orderBy: { createdAt: 'desc' },
-        },
-      },
+    const dto = await getApplicationDto(String(req.params.id));
+    if (!dto) return res.status(404).json({ error: 'Application not found' });
+    const documents = await prisma.document.findMany({
+      where: { jobApplicationId: dto.id },
+      select: { id: true, type: true, version: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
     });
-
-    if (!application) {
-      return res.status(404).json({ error: 'Application not found' });
-    }
-
-    res.json(application);
-  } catch (error: any) {
+    res.json({ ...dto, documents });
+  } catch (error) {
+    console.error('Error fetching application:', error);
     res.status(500).json({ error: 'Failed to fetch application' });
   }
 });
 
-// POST /api/applications - Create a new application
+/**
+ * POST /api/applications — track a job. Idempotent per (job, profile): saving the same job
+ * twice returns the existing application with `duplicate: true` (200) instead of a copy.
+ */
 applicationsRouter.post('/applications', async (req: Request, res: Response) => {
   try {
-    let { jobListingId, candidateProfileId, status, stage, notes, isApproved } = req.body;
+    const { jobListingId, candidateProfileId, stage, notes, isApproved, source } = req.body ?? {};
 
-    if (!jobListingId) {
+    if (!jobListingId || typeof jobListingId !== 'string') {
       return res.status(400).json({ error: 'Missing required field: jobListingId' });
     }
-
-    if (!candidateProfileId) {
-      const defaultProfile = await prisma.candidateProfile.findFirst({ orderBy: { id: 'asc' } });
-      if (!defaultProfile) {
-        return res.status(400).json({ error: 'No candidate profile found. Please create a profile first.' });
-      }
-      candidateProfileId = defaultProfile.id;
+    if (stage !== undefined && !isStage(stage)) {
+      return res.status(400).json({ error: `Invalid stage. Use one of: ${STAGES.join(', ')}` });
+    }
+    if (source !== undefined && !(APPLICATION_SOURCES as readonly string[]).includes(source)) {
+      return res.status(400).json({ error: `Invalid source. Use one of: ${APPLICATION_SOURCES.join(', ')}` });
     }
 
-    const application = await prisma.jobApplication.create({
+    const job = await prisma.jobListing.findUnique({ where: { id: jobListingId }, select: { id: true, company: true } });
+    if (!job) return res.status(404).json({ error: 'Job listing not found' });
+
+    let profileId: string;
+    if (candidateProfileId) {
+      const profile = await prisma.candidateProfile.findUnique({ where: { id: String(candidateProfileId) }, select: { id: true } });
+      if (!profile) return res.status(400).json({ error: 'Candidate profile not found' });
+      profileId = profile.id;
+    } else {
+      profileId = (await ensureActiveProfile()).id;
+    }
+
+    const existing = await prisma.jobApplication.findFirst({
+      where: { jobListingId, candidateProfileId: profileId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (existing) {
+      const dto = await getApplicationDto(existing.id);
+      return res.status(200).json({ ...dto, duplicate: true });
+    }
+
+    const finalStage: Stage = stage ?? 'BOOKMARKED';
+    const created = await prisma.jobApplication.create({
       data: {
         jobListingId,
-        candidateProfileId,
-        status: status || 'DRAFT',
-        stage: stage || 'BOOKMARKED',
-        notes,
+        candidateProfileId: profileId,
+        stage: finalStage,
+        status: statusForStage(finalStage),
+        notes: cleanNotes(notes),
         isApproved: Boolean(isApproved),
+        source: source ?? 'manual',
+        companyKey: companyKey(job.company),
+        submittedAt: finalStage === 'APPLIED' ? new Date() : null,
       },
-      include: {
-        jobListing: true,
-        candidateProfile: true,
-      },
+      select: { id: true, stage: true },
     });
 
     await prisma.auditLog.create({
       data: {
         action: 'JOB_APPLICATION_CREATED',
-        entityId: application.id,
-        metadata: { jobListingId, stage: application.stage },
+        entityId: created.id,
+        metadata: { jobListingId, stage: created.stage },
       },
     });
 
-    res.status(201).json(application);
-  } catch (error: any) {
+    const dto = await getApplicationDto(created.id);
+    res.status(201).json({ ...dto, duplicate: false });
+  } catch (error) {
     console.error('Error creating application:', error);
     res.status(500).json({ error: 'Failed to create application' });
   }
 });
 
-// PATCH /api/applications/:id - Update application stage, approval, notes
+/**
+ * PATCH /api/applications/:id — manual edits from the UI (stage, notes, approval, appliedUrl).
+ * The stage is validated and `status` is always derived from it; moving to APPLIED stamps
+ * `submittedAt` once.
+ */
 applicationsRouter.patch('/applications/:id', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    const { stage, status, isApproved, notes, appliedUrl } = req.body;
+    const { stage, status, isApproved, notes, appliedUrl } = req.body ?? {};
+
+    if (stage !== undefined && !isStage(stage)) {
+      return res.status(400).json({ error: `Invalid stage. Use one of: ${STAGES.join(', ')}` });
+    }
+    if (status !== undefined && stage === undefined) {
+      return res.status(400).json({ error: 'status is derived from stage; send stage instead' });
+    }
 
     const existing = await prisma.jobApplication.findUnique({ where: { id } });
     if (!existing) {
       return res.status(404).json({ error: 'Application not found' });
     }
 
-    const updateData: any = {};
-    if (stage !== undefined) updateData.stage = stage;
-    if (status !== undefined) updateData.status = status;
+    const updateData: Record<string, unknown> = {};
+    if (stage !== undefined) {
+      updateData.stage = stage;
+      updateData.status = statusForStage(stage);
+      if (stage === 'APPLIED' && !existing.submittedAt) updateData.submittedAt = new Date();
+    }
     if (isApproved !== undefined) updateData.isApproved = Boolean(isApproved);
-    if (notes !== undefined) updateData.notes = notes;
-    if (appliedUrl !== undefined) updateData.appliedUrl = appliedUrl;
+    if (notes !== undefined) updateData.notes = cleanNotes(notes);
+    if (appliedUrl !== undefined) updateData.appliedUrl = appliedUrl ? String(appliedUrl).slice(0, 2000) : null;
 
-    if (stage === 'APPLIED' && !existing.submittedAt) {
-      updateData.submittedAt = new Date();
+    if (Object.keys(updateData).length) {
+      await prisma.jobApplication.update({ where: { id }, data: updateData });
+      await prisma.auditLog.create({
+        data: {
+          action: 'JOB_APPLICATION_UPDATED',
+          entityId: id,
+          metadata: JSON.parse(JSON.stringify({ changes: updateData, from: { stage: existing.stage } })),
+        },
+      });
     }
 
-    const updated = await prisma.jobApplication.update({
-      where: { id },
-      data: updateData,
-      include: {
-        jobListing: true,
-        candidateProfile: true,
-        documents: true,
-      },
-    });
-
-    await prisma.auditLog.create({
-      data: {
-        action: 'JOB_APPLICATION_UPDATED',
-        entityId: id,
-        metadata: { changes: updateData },
-      },
-    });
-
-    res.json(updated);
-  } catch (error: any) {
+    res.json(await getApplicationDto(id));
+  } catch (error) {
+    console.error('Error updating application:', error);
     res.status(500).json({ error: 'Failed to update application' });
   }
 });
@@ -162,9 +196,9 @@ applicationsRouter.post('/applications/:id/submit', async (req: Request, res: Re
     const updated = await prisma.jobApplication.update({
       where: { id },
       data: {
-        status: 'SUBMITTED',
+        status: statusForStage('APPLIED'),
         stage: 'APPLIED',
-        submittedAt: new Date(),
+        submittedAt: application.submittedAt ?? new Date(),
       },
       include: {
         jobListing: true,
@@ -195,7 +229,12 @@ applicationsRouter.delete('/applications/:id', async (req: Request, res: Respons
       return res.status(404).json({ error: 'Application not found' });
     }
 
-    await prisma.jobApplication.delete({ where: { id } });
+    // Detach rows that reference the application so the delete cannot fail on FKs.
+    await prisma.$transaction([
+      prisma.document.updateMany({ where: { jobApplicationId: id }, data: { jobApplicationId: null } }),
+      prisma.emailEvent.updateMany({ where: { jobApplicationId: id }, data: { jobApplicationId: null } }),
+      prisma.jobApplication.delete({ where: { id } }),
+    ]);
 
     await prisma.auditLog.create({
       data: {
@@ -205,7 +244,8 @@ applicationsRouter.delete('/applications/:id', async (req: Request, res: Respons
     });
 
     res.json({ success: true, message: 'Application deleted' });
-  } catch (error: any) {
+  } catch (error) {
+    console.error('Error deleting application:', error);
     res.status(500).json({ error: 'Failed to delete application' });
   }
 });
