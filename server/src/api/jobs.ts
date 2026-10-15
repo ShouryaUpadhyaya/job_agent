@@ -63,8 +63,15 @@ const list = (v: unknown): string[] =>
     .map((s) => s.trim())
     .filter(Boolean);
 
+/**
+ * Placeholder listings created from application-confirmation emails (source 'email', no
+ * description, score 0) exist only to anchor a pipeline entry; Discovery never lists them.
+ * Job-alert listings use 'email:<provider>' and are unaffected.
+ */
+const NOT_EMAIL_PLACEHOLDER: Prisma.JobListingWhereInput = { source: { not: 'email' } };
+
 export function buildJobsWhere(query: Record<string, unknown>, now = new Date()): Prisma.JobListingWhereInput {
-  const and: Prisma.JobListingWhereInput[] = [];
+  const and: Prisma.JobListingWhereInput[] = [NOT_EMAIL_PLACEHOLDER];
 
   if (bool(query.activeOnly, true)) and.push({ isActive: true });
   if (bool(query.hideDismissed, true)) and.push({ userStatus: { not: 'DISMISSED' } });
@@ -123,7 +130,7 @@ export function buildJobsWhere(query: Record<string, unknown>, now = new Date())
     });
   }
 
-  return and.length ? { AND: and } : {};
+  return { AND: and };
 }
 
 export function buildJobsOrderBy(sort: unknown): Prisma.JobListingOrderByWithRelationInput[] {
@@ -220,14 +227,14 @@ jobsRouter.get('/jobs', async (req, res) => {
 
 jobsRouter.get('/jobs/facets', async (_req, res) => {
   try {
-    const baseWhere: Prisma.JobListingWhereInput = { isActive: true, userStatus: { not: 'DISMISSED' } };
+    const baseWhere: Prisma.JobListingWhereInput = { ...NOT_EMAIL_PLACEHOLDER, isActive: true, userStatus: { not: 'DISMISSED' } };
     const [bySource, total, internships, saved, dismissed, closed, profile] = await Promise.all([
       prisma.jobListing.groupBy({ by: ['source'], where: baseWhere, _count: { _all: true } }),
       prisma.jobListing.count({ where: baseWhere }),
       prisma.jobListing.count({ where: { ...baseWhere, isInternship: true } }),
-      prisma.jobListing.count({ where: { isActive: true, userStatus: 'SAVED' } }),
-      prisma.jobListing.count({ where: { userStatus: 'DISMISSED' } }),
-      prisma.jobListing.count({ where: { isActive: false } }),
+      prisma.jobListing.count({ where: { ...NOT_EMAIL_PLACEHOLDER, isActive: true, userStatus: 'SAVED' } }),
+      prisma.jobListing.count({ where: { ...NOT_EMAIL_PLACEHOLDER, userStatus: 'DISMISSED' } }),
+      prisma.jobListing.count({ where: { ...NOT_EMAIL_PLACEHOLDER, isActive: false } }),
       getActiveProfile(),
     ]);
 

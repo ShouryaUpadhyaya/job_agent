@@ -44,6 +44,7 @@ describe('Jobs API', () => {
   describe('with data', () => {
     let appliedId = '';
     let dismissedId = '';
+    let placeholderId = '';
 
     beforeAll(async () => {
       const now = Date.now();
@@ -60,6 +61,25 @@ describe('Jobs API', () => {
       await prisma.jobApplication.create({ data: { jobListingId: applied.id, candidateProfileId: profile.id, stage: 'APPLIED', status: 'SUBMITTED' } });
       // Legacy capitalised source value
       await seedJob({ externalId: 'g', title: 'Platform Intern', source: 'Greenhouse', isInternship: true, score: 50 });
+      // Placeholder listing created from an application-confirmation email.
+      const placeholder = await prisma.jobListing.create({
+        data: { externalId: 'email-msg-1', source: 'email', title: 'Email Placeholder Role', company: 'Mail Co', url: '', description: '', tags: ['From email'] },
+      });
+      placeholderId = placeholder.id;
+      await prisma.jobApplication.create({ data: { jobListingId: placeholder.id, candidateProfileId: profile.id, stage: 'APPLIED', status: 'SUBMITTED', source: 'email' } });
+    });
+
+    it('never lists email-created placeholder listings, but keeps them in the pipeline', async () => {
+      const titles = async (q: Record<string, any>) =>
+        (await request(app).get('/api/jobs').query(q)).body.jobs.map((j: any) => j.title);
+      expect(await titles({ pageSize: 100 })).not.toContain('Email Placeholder Role');
+      expect(await titles({ sources: 'email' })).not.toContain('Email Placeholder Role');
+      expect(await titles({ q: 'Placeholder' })).toEqual([]);
+      const facets = await request(app).get('/api/jobs/facets');
+      expect(facets.body.sources.map((s: any) => s.value)).not.toContain('email');
+      expect((await request(app).get(`/api/jobs/${placeholderId}`)).status).toBe(200);
+      const pipeline = await request(app).get('/api/applications');
+      expect(pipeline.body.map((a: any) => a.job.title)).toContain('Email Placeholder Role');
     });
 
     it('paginates, hides closed and dismissed by default, and sorts by best score', async () => {
