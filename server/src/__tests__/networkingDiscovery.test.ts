@@ -109,12 +109,17 @@ describe('networking discovery API', () => {
     await prisma.emailEvent.deleteMany();
     await prisma.networkingMessage.deleteMany();
     await prisma.networkingContact.deleteMany();
+    // Applications/resumes left by other files reference the profile.
+    await prisma.document.deleteMany();
+    await prisma.jobApplication.deleteMany();
+    await prisma.resume.deleteMany();
     await prisma.candidateProfile.deleteMany();
     await prisma.candidateProfile.create({ data: { name: 'Asha', school: 'VIT Vellore', skills: [] } });
   });
   afterEach(() => vi.unstubAllGlobals());
   afterAll(async () => {
     await prisma.networkingContact.deleteMany();
+    await prisma.resume.deleteMany();
     await prisma.candidateProfile.deleteMany();
     await prisma.$disconnect();
   });
