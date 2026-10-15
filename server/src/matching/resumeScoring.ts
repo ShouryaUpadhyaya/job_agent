@@ -85,49 +85,63 @@ export function matchUpdateData(match: ResumeMatch) {
 }
 
 let rescoreRunning: Promise<{ rescored: number }> | null = null;
+let rescoreQueued: Promise<{ rescored: number }> | null = null;
 
 /**
  * Rescores every active job against the active profile and its resumes, in batches.
- * Called after each sync; the profile/resume API should call it after edits.
- * Concurrent calls share one run.
+ * Called after each sync and after profile/resume edits. A call made while a run is in
+ * progress queues exactly one follow-up run, so edits made mid-run are never scored
+ * with a stale resume set.
  */
 export function rescoreAllJobs(options: { batchSize?: number; includeInactive?: boolean } = {}): Promise<{ rescored: number }> {
-  if (rescoreRunning) return rescoreRunning;
-  rescoreRunning = (async () => {
-    const profile = await getActiveProfile();
-    if (!profile) return { rescored: 0 };
-    const resumes = await getProfileResumes(profile.id);
-    const batchSize = options.batchSize ?? 200;
-    let cursor: string | undefined;
-    let rescored = 0;
-
-    for (;;) {
-      const jobs = await prisma.jobListing.findMany({
-        where: options.includeInactive ? {} : { isActive: true },
-        orderBy: { id: 'asc' },
-        take: batchSize,
-        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-        select: {
-          id: true, title: true, description: true, company: true, location: true,
-          publishedAt: true, createdAt: true, employmentType: true,
-        },
-      });
-      if (!jobs.length) break;
-      await prisma.$transaction(
-        jobs.map((job) =>
-          prisma.jobListing.update({
-            where: { id: job.id },
-            data: matchUpdateData(scoreJobAcrossResumes(profile, resumes, job)),
-          })
-        )
-      );
-      rescored += jobs.length;
-      cursor = jobs[jobs.length - 1].id;
-      if (jobs.length < batchSize) break;
+  if (rescoreRunning) {
+    if (!rescoreQueued) {
+      rescoreQueued = rescoreRunning
+        .catch(() => undefined)
+        .then(() => {
+          rescoreQueued = null;
+          return rescoreAllJobs(options);
+        });
     }
-    return { rescored };
-  })().finally(() => {
+    return rescoreQueued;
+  }
+  rescoreRunning = runRescore(options).finally(() => {
     rescoreRunning = null;
   });
   return rescoreRunning;
+}
+
+async function runRescore(options: { batchSize?: number; includeInactive?: boolean }): Promise<{ rescored: number }> {
+  const profile = await getActiveProfile();
+  if (!profile) return { rescored: 0 };
+  const resumes = await getProfileResumes(profile.id);
+  const batchSize = options.batchSize ?? 200;
+  let cursor: string | undefined;
+  let rescored = 0;
+
+  for (;;) {
+    const jobs = await prisma.jobListing.findMany({
+      where: options.includeInactive ? {} : { isActive: true },
+      orderBy: { id: 'asc' },
+      take: batchSize,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      select: {
+        id: true, title: true, description: true, company: true, location: true,
+        publishedAt: true, createdAt: true, employmentType: true,
+      },
+    });
+    if (!jobs.length) break;
+    await prisma.$transaction(
+      jobs.map((job) =>
+        prisma.jobListing.update({
+          where: { id: job.id },
+          data: matchUpdateData(scoreJobAcrossResumes(profile, resumes, job)),
+        })
+      )
+    );
+    rescored += jobs.length;
+    cursor = jobs[jobs.length - 1].id;
+    if (jobs.length < batchSize) break;
+  }
+  return { rescored };
 }
