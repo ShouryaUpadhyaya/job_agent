@@ -53,15 +53,82 @@ export class ConnectorScheduler {
 }
 
 import { dailyBriefingService } from '../briefing/summary';
+import { istDateKey } from '../lib/time';
 
 let activeScheduler: ConnectorScheduler | null = null;
+let activeBriefingTrigger: DailyBriefingTrigger | null = null;
 
-export function shouldRunDailyBriefingNow(now: Date = new Date(), targetHourIST: number = 20): boolean {
-  // IST is UTC + 5:30 (330 min)
-  const istOffsetMinutes = 330;
-  const istTimeMs = now.getTime() + (istOffsetMinutes * 60 * 1000);
-  const istDate = new Date(istTimeMs);
-  return istDate.getUTCHours() === targetHourIST;
+export const BRIEFING_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const BRIEFING_RETRY_AFTER_FAILURE_MS = 30 * 60 * 1000;
+
+export type BriefingCheckResult = 'not-due' | 'generated' | 'busy' | 'backoff' | 'failed';
+
+export interface BriefingTriggerDeps {
+  /** True when it's 20:00 IST or later and today's scheduled briefing hasn't been generated. */
+  isDue(now: Date): Promise<boolean>;
+  generate(now: Date): Promise<unknown>;
+}
+
+const defaultBriefingDeps: BriefingTriggerDeps = {
+  isDue: (now) => dailyBriefingService.isScheduledRunDue(now),
+  generate: (now) => dailyBriefingService.generate(now, 'scheduled'),
+};
+
+/**
+ * Generates the daily briefing once per IST day at/after 20:00 IST. Runs on its own short
+ * interval (independent of the long job sync) and checks once on start, so a missed 20:00 tick
+ * (server down, long sync) is caught up later the same evening. "Already generated" lives in the
+ * database (one row per IST day), so restarts never duplicate it.
+ */
+export class DailyBriefingTrigger {
+  private timer: NodeJS.Timeout | null = null;
+  private running = false;
+  private lastFailure: { day: string; at: number } | null = null;
+
+  constructor(
+    private deps: BriefingTriggerDeps = defaultBriefingDeps,
+    private clock: () => Date = () => new Date(),
+    private intervalMs: number = BRIEFING_CHECK_INTERVAL_MS
+  ) {}
+
+  async check(): Promise<BriefingCheckResult> {
+    if (this.running) return 'busy';
+    this.running = true;
+    const now = this.clock();
+    try {
+      const day = istDateKey(now);
+      if (this.lastFailure && this.lastFailure.day === day && now.getTime() - this.lastFailure.at < BRIEFING_RETRY_AFTER_FAILURE_MS) {
+        return 'backoff';
+      }
+      if (!(await this.deps.isDue(now))) return 'not-due';
+      console.log(`[Scheduler] Generating the daily briefing for ${day} (IST)...`);
+      await this.deps.generate(now);
+      this.lastFailure = null;
+      console.log('[Scheduler] Daily briefing generated.');
+      return 'generated';
+    } catch (err) {
+      this.lastFailure = { day: istDateKey(now), at: now.getTime() };
+      console.error('[Scheduler] Daily briefing error:', err);
+      return 'failed';
+    } finally {
+      this.running = false;
+    }
+  }
+
+  start() {
+    if (this.timer) return;
+    void this.check();
+    this.timer = setInterval(() => void this.check(), this.intervalMs);
+  }
+
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  isStarted() {
+    return this.timer !== null;
+  }
 }
 
 export function initScheduler(intervalMinutes?: number): ConnectorScheduler {
@@ -99,25 +166,22 @@ export function initScheduler(intervalMinutes?: number): ConnectorScheduler {
     } catch (err) {
       console.error('[Scheduler] Wellfound sync error:', err);
     }
-
-    // Daily briefing check (8:00 PM IST)
-    try {
-      if (shouldRunDailyBriefingNow()) {
-        console.log('[Scheduler] Triggering scheduled 8:00 PM IST Daily Job-Search Briefing...');
-        await dailyBriefingService.generateDailyBriefing();
-        console.log('[Scheduler] Daily briefing generated successfully.');
-      }
-    } catch (err) {
-      console.error('[Scheduler] Daily briefing error:', err);
-    }
   });
 
   activeScheduler.start();
   console.log(`[Scheduler] Initialized background scheduler (Interval: ${minutes} min)`);
+
+  // Daily briefing: separate lightweight check so the long sync above can't delay or skip it.
+  activeBriefingTrigger = new DailyBriefingTrigger();
+  activeBriefingTrigger.start();
   return activeScheduler;
 }
 
 export function shutdownScheduler() {
+  if (activeBriefingTrigger) {
+    activeBriefingTrigger.stop();
+    activeBriefingTrigger = null;
+  }
   if (activeScheduler) {
     activeScheduler.stop();
     activeScheduler = null;
