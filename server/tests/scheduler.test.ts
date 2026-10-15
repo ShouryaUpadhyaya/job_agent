@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { BRIEFING_CHECK_INTERVAL_MS, ConnectorScheduler, DailyBriefingTrigger } from '../src/scheduler/cron';
+import {
+  BRIEFING_CHECK_INTERVAL_MS,
+  ConnectorScheduler,
+  DailyBriefingTrigger,
+  GmailSyncDeps,
+  gmailAutoSyncEnabled,
+  runScheduledGmailSync,
+} from '../src/scheduler/cron';
 import { scheduledRunDue } from '../src/briefing/summary';
 import { istDateKey } from '../src/lib/time';
 
@@ -159,5 +166,58 @@ describe('Daily briefing trigger', () => {
     expect(scheduledRunDue(ist('2026-10-15', '20:00'), null)).toBe(true);
     expect(scheduledRunDue(ist('2026-10-15', '23:59'), ist('2026-10-15', '12:00'))).toBe(true);
     expect(scheduledRunDue(ist('2026-10-15', '23:59'), ist('2026-10-15', '20:00'))).toBe(false);
+  });
+});
+
+describe('Scheduled Gmail sync', () => {
+  const deps = (over: Partial<GmailSyncDeps> = {}): GmailSyncDeps => ({
+    isConfigured: () => true,
+    isConnected: vi.fn(async () => true),
+    isSyncing: vi.fn(async () => false),
+    sync: vi.fn(async () => ({ fetched: 3, new: 2, errors: 0, stageChanges: 1 })),
+    ...over,
+  });
+
+  afterEach(() => {
+    delete process.env.GMAIL_AUTO_SYNC;
+    vi.restoreAllMocks();
+  });
+
+  it('syncs when configured and connected', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const d = deps();
+    expect(await runScheduledGmailSync(d)).toBe('synced');
+    expect(d.sync).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips silently when not configured or not connected', async () => {
+    const notConfigured = deps({ isConfigured: () => false });
+    expect(await runScheduledGmailSync(notConfigured)).toBe('not-configured');
+    expect(notConfigured.sync).not.toHaveBeenCalled();
+    const notConnected = deps({ isConnected: vi.fn(async () => false) });
+    expect(await runScheduledGmailSync(notConnected)).toBe('not-connected');
+    expect(notConnected.sync).not.toHaveBeenCalled();
+  });
+
+  it('skips while a manual sync is running, including a 409 race', async () => {
+    const running = deps({ isSyncing: vi.fn(async () => true) });
+    expect(await runScheduledGmailSync(running)).toBe('busy');
+    expect(running.sync).not.toHaveBeenCalled();
+    const race = deps({ sync: vi.fn(async () => Promise.reject(Object.assign(new Error('busy'), { code: 'sync_in_progress' }))) });
+    expect(await runScheduledGmailSync(race)).toBe('busy');
+  });
+
+  it('never throws on sync errors', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failing = deps({ sync: vi.fn(async () => Promise.reject(new Error('boom'))) });
+    expect(await runScheduledGmailSync(failing)).toBe('failed');
+  });
+
+  it('can be turned off with GMAIL_AUTO_SYNC=false', async () => {
+    process.env.GMAIL_AUTO_SYNC = 'false';
+    const d = deps();
+    expect(await runScheduledGmailSync(d)).toBe('disabled');
+    expect(d.isConnected).not.toHaveBeenCalled();
+    expect(gmailAutoSyncEnabled({})).toBe(true);
   });
 });

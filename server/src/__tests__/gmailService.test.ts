@@ -256,6 +256,24 @@ describe('sync', () => {
     expect(Math.round((Date.now() - after2) / DAY)).toBe(1);
   });
 
+  it('runs one sync at a time: a concurrent call gets 409 sync_in_progress', async () => {
+    await connectedAccount();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    g.list.mockImplementation(async () => {
+      await gate;
+      return { data: { messages: [] } };
+    });
+    const first = gmailService.syncInbox();
+    expect(gmailService.isSyncing()).toBe(true);
+    const second = await request(app).post('/api/gmail/sync');
+    expect(second.status).toBe(409);
+    expect(second.body.code).toBe('sync_in_progress');
+    release();
+    await first;
+    expect(gmailService.isSyncing()).toBe(false);
+  });
+
   it('caps a run and resumes from the newest processed message', async () => {
     process.env.GMAIL_SYNC_MAX_MESSAGES = '2';
     try {

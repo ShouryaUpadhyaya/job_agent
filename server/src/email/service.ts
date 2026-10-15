@@ -359,8 +359,30 @@ export class GmailService {
     return new GmailError(d.expired ? 401 : 502, d.code, d.message, d.fix);
   }
 
-  /** Incremental sync of the connected mailbox. Never inserts demo data. */
+  private syncing = false;
+
+  /** True while a sync (manual or scheduled) is in flight. */
+  isSyncing(): boolean {
+    return this.syncing;
+  }
+
+  /**
+   * Incremental sync of the connected mailbox. Never inserts demo data. One sync at a time:
+   * a second call while one is running fails with 409 sync_in_progress.
+   */
   async syncInbox(now = new Date()): Promise<SyncResult> {
+    if (this.syncing) {
+      throw new GmailError(409, 'sync_in_progress', 'A Gmail sync is already running.', 'Wait for it to finish, then sync again.');
+    }
+    this.syncing = true;
+    try {
+      return await this.runSync(now);
+    } finally {
+      this.syncing = false;
+    }
+  }
+
+  private async runSync(now: Date): Promise<SyncResult> {
     if (!getGmailConfig().configured) this.newClient(); // throws not_configured
     const account = await prisma.connectedAccount.findFirst({ where: { provider: 'gmail', status: 'CONNECTED' }, orderBy: { updatedAt: 'desc' } });
     if (!account) {

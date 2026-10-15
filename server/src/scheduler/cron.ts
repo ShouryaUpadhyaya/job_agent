@@ -53,6 +53,8 @@ export class ConnectorScheduler {
 }
 
 import { dailyBriefingService } from '../briefing/summary';
+import { getGmailConfig } from '../email/config';
+import { prisma } from '../db';
 import { istDateKey } from '../lib/time';
 
 let activeScheduler: ConnectorScheduler | null = null;
@@ -131,6 +133,53 @@ export class DailyBriefingTrigger {
   }
 }
 
+export type ScheduledGmailSyncResult = 'disabled' | 'not-configured' | 'not-connected' | 'busy' | 'synced' | 'failed';
+
+export interface GmailSyncDeps {
+  isConfigured(): boolean;
+  isConnected(): Promise<boolean>;
+  isSyncing(): Promise<boolean>;
+  sync(): Promise<{ fetched: number; new: number; errors: number; stageChanges: number }>;
+}
+
+// Lazy import so loading the scheduler never pulls in googleapis.
+const loadGmail = () => import('../email/service').then((m) => m.gmailService);
+
+const defaultGmailDeps: GmailSyncDeps = {
+  isConfigured: () => getGmailConfig().configured,
+  isConnected: async () =>
+    Boolean(await prisma.connectedAccount.findFirst({ where: { provider: 'gmail', status: 'CONNECTED' }, select: { id: true } })),
+  isSyncing: async () => (await loadGmail()).isSyncing(),
+  sync: async () => (await loadGmail()).syncInbox(),
+};
+
+/** GMAIL_AUTO_SYNC (default true) turns the scheduled inbox sync on or off. */
+export function gmailAutoSyncEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = (env.GMAIL_AUTO_SYNC ?? '').trim().toLowerCase();
+  return !['0', 'false', 'no', 'off'].includes(v);
+}
+
+/**
+ * Scheduled Gmail sync: runs only when enabled, configured and connected, and skips (instead of
+ * queueing) when a manual sync is already running. Never throws.
+ */
+export async function runScheduledGmailSync(deps: GmailSyncDeps = defaultGmailDeps): Promise<ScheduledGmailSyncResult> {
+  if (!gmailAutoSyncEnabled()) return 'disabled';
+  try {
+    if (!deps.isConfigured()) return 'not-configured';
+    if (!(await deps.isConnected())) return 'not-connected';
+    if (await deps.isSyncing()) return 'busy';
+    const r = await deps.sync();
+    console.log(`[Scheduler] Gmail sync: ${r.fetched} fetched, ${r.new} new, ${r.stageChanges} stage changes, ${r.errors} errors.`);
+    return 'synced';
+  } catch (err: any) {
+    if (err?.code === 'sync_in_progress') return 'busy';
+    if (err?.code === 'not_connected' || err?.code === 'not_configured') return 'not-connected';
+    console.error('[Scheduler] Gmail sync error:', err?.message || err);
+    return 'failed';
+  }
+}
+
 export function initScheduler(intervalMinutes?: number): ConnectorScheduler {
   if (activeScheduler) {
     return activeScheduler;
@@ -166,6 +215,9 @@ export function initScheduler(intervalMinutes?: number): ConnectorScheduler {
     } catch (err) {
       console.error('[Scheduler] Wellfound sync error:', err);
     }
+
+    // Gmail inbox (only when connected; skips if a manual sync is running)
+    await runScheduledGmailSync();
   });
 
   activeScheduler.start();
