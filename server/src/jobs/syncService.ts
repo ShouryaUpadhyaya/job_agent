@@ -1,44 +1,46 @@
+import { JobSourceConfig } from '@prisma/client';
 import { prisma } from '../db';
-import { JobConnector, RawJobPayload } from '../connectors/types';
-import { GreenhouseConnector } from '../connectors/greenhouse';
-import { AshbyConnector } from '../connectors/ashby';
-import { LeverConnector } from '../connectors/lever';
-import { ArbeitnowConnector } from '../connectors/arbeitnow';
-import { LinkedInConnector } from '../connectors/linkedin';
-import { WellfoundConnector } from '../connectors/wellfound';
-import { processAndUpsertJob } from './normalization';
+import { JobConnector, RawJobPayload, FEED_TAG_PREFIX } from '../connectors/types';
+import { createConnector, DEFAULT_SOURCES, UNSUPPORTED_SOURCE_TYPES } from '../connectors/registry';
+import { mapLimit } from '../connectors/utils';
+import { ensureActiveProfile, getProfileResumes } from '../lib/profile';
+import { rescoreAllJobs } from '../matching/resumeScoring';
+import { processAndUpsertJob, ScoringProfile } from './normalization';
+import { recordFeedSync } from './liveness';
+import { ResumeLike } from '../matching/resumeScoring';
+
+export interface ConnectorResult {
+  source: string;
+  status: 'SUCCESS' | 'FAILED' | 'SKIPPED';
+  fetched: number;
+  new: number;
+  updated: number;
+  closed?: number;
+  error?: string;
+}
 
 export interface SyncSummary {
   status: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'ALREADY_RUNNING';
   totalFetched: number;
   totalNew: number;
   totalUpdated: number;
-  connectorResults: {
-    source: string;
-    status: 'SUCCESS' | 'FAILED';
-    fetched: number;
-    new: number;
-    updated: number;
-    error?: string;
-  }[];
+  connectorResults: ConnectorResult[];
   durationMs: number;
+}
+
+interface ActiveConnector {
+  connector: JobConnector;
+  config?: JobSourceConfig;
+}
+
+export function connectorLabel(connector: JobConnector): string {
+  return connector.name || connector.source || 'Unknown';
 }
 
 export class SyncService {
   private connectors: JobConnector[] = [];
   private isSyncRunning = false;
   private hasCustomConnectors = false;
-
-  constructor() {
-    this.connectors = [
-      new GreenhouseConnector('cloudflare', 'Cloudflare'),
-      new AshbyConnector('linear', 'Linear'),
-      new LeverConnector('spotify', 'Spotify'),
-      new ArbeitnowConnector(),
-      new LinkedInConnector('Software Engineer Intern', 'India', 'LinkedIn Jobs'),
-      new WellfoundConnector('Wellfound Startups'),
-    ];
-  }
 
   registerConnector(connector: JobConnector) {
     this.connectors.push(connector);
@@ -58,82 +60,127 @@ export class SyncService {
     return this.isSyncRunning;
   }
 
+  /** Kept for callers of the old API; see connectors/registry.ts. */
   static createConnector(config: { sourceType: string; boardToken: string; name: string }): JobConnector | null {
-    switch (config.sourceType.toLowerCase()) {
-      case 'greenhouse':
-        return new GreenhouseConnector(config.boardToken, config.name);
-      case 'ashby':
-        return new AshbyConnector(config.boardToken, config.name);
-      case 'lever':
-        return new LeverConnector(config.boardToken, config.name);
-      case 'arbeitnow':
-        return new ArbeitnowConnector();
-      case 'linkedin':
-        return new LinkedInConnector(config.boardToken || 'Software Engineer Intern', 'India', config.name || 'LinkedIn Jobs');
-      case 'wellfound':
-        return new WellfoundConnector(config.name || 'Wellfound Startups');
-      default:
-        return null;
-    }
+    return createConnector(config);
   }
 
+  /**
+   * Adds curated default sources that are missing (never deletes or re-enables user rows) and
+   * disables legacy LinkedIn/Wellfound connector rows, which violated those sites' terms.
+   */
   async ensureDefaultSources(): Promise<void> {
-    const count = await prisma.jobSourceConfig.count();
-    if (count === 0) {
-      const defaultConfigs = [
-        { sourceType: 'greenhouse', boardToken: 'cloudflare', name: 'Cloudflare' },
-        { sourceType: 'ashby', boardToken: 'linear', name: 'Linear' },
-        { sourceType: 'lever', boardToken: 'spotify', name: 'Spotify' },
-        { sourceType: 'arbeitnow', boardToken: 'global', name: 'Arbeitnow Tech' },
-        { sourceType: 'linkedin', boardToken: 'software-engineer-intern', name: 'LinkedIn Jobs' },
-        { sourceType: 'wellfound', boardToken: 'startups', name: 'Wellfound Startups' },
-      ];
-      for (const cfg of defaultConfigs) {
-        await prisma.jobSourceConfig.upsert({
-          where: {
-            sourceType_boardToken: {
-              sourceType: cfg.sourceType,
-              boardToken: cfg.boardToken,
-            },
-          },
-          update: {},
-          create: cfg,
-        });
-      }
+    await prisma.jobSourceConfig.updateMany({
+      where: { sourceType: { in: Object.keys(UNSUPPORTED_SOURCE_TYPES) }, enabled: true },
+      data: { enabled: false },
+    });
+    const existing = await prisma.jobSourceConfig.findMany({ select: { sourceType: true, boardToken: true } });
+    const have = new Set(existing.map((s) => `${s.sourceType}:${s.boardToken.toLowerCase()}`));
+    const missing = DEFAULT_SOURCES.filter((d) => !have.has(`${d.sourceType}:${d.boardToken.toLowerCase()}`));
+    if (missing.length) {
+      await prisma.jobSourceConfig.createMany({ data: missing, skipDuplicates: true });
     }
   }
 
-  async getActiveConnectors(): Promise<{ connector: JobConnector; configId?: string }[]> {
+  async getActiveConnectors(): Promise<ActiveConnector[]> {
     if (this.hasCustomConnectors) {
       return this.connectors.map((c) => ({ connector: c }));
     }
-
-    try {
-      await this.ensureDefaultSources();
-      const configs = await prisma.jobSourceConfig.findMany({
-        where: { enabled: true },
-        orderBy: { createdAt: 'asc' },
-      });
-
-      const list: { connector: JobConnector; configId?: string }[] = [];
-      for (const cfg of configs) {
-        const conn = SyncService.createConnector(cfg);
-        if (conn) {
-          list.push({ connector: conn, configId: cfg.id });
-        }
-      }
-
-      if (list.length > 0) {
-        return list;
-      }
-    } catch {
-      // Fallback to in-memory defaults if DB is temporarily unreachable
+    await this.ensureDefaultSources();
+    const configs = await prisma.jobSourceConfig.findMany({
+      where: { enabled: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const list: ActiveConnector[] = [];
+    for (const config of configs) {
+      const connector = createConnector(config);
+      if (connector) list.push({ connector, config });
     }
-
-    return this.connectors.map((c) => ({ connector: c }));
+    return list;
   }
 
-  async syncAll(options: { force?: boolean } = {}): Promise<SyncSummary> {
+  /**
+   * Fetches one connector, upserts its listings, applies feed liveness and records a SyncRun
+   * (SUCCESS or FAILED). Never throws for connector errors.
+   */
+  async syncConnector(
+    item: ActiveConnector,
+    ctx: { profile: ScoringProfile; resumes: ResumeLike[] }
+  ): Promise<ConnectorResult> {
+    const { connector, config } = item;
+    const label = connectorLabel(connector);
+
+    if (connector.minIntervalMs && config?.lastSyncedAt && Date.now() - config.lastSyncedAt.getTime() < connector.minIntervalMs) {
+      return { source: label, status: 'SKIPPED', fetched: 0, new: 0, updated: 0, error: 'Polled recently (source asks for infrequent polling)' };
+    }
+
+    const startedAt = new Date();
+    const syncRun = await prisma.syncRun.create({
+      data: { source: label, status: 'RUNNING', startedAt },
+    });
+
+    try {
+      const rawJobs = (await connector.fetchJobs()) as RawJobPayload[];
+      const feedTag = connector.feedKey ? `${FEED_TAG_PREFIX}${connector.feedKey}` : null;
+      let created = 0;
+      let updated = 0;
+
+      for (const rawJob of rawJobs) {
+        if (!rawJob || !rawJob.externalId || !rawJob.url || !rawJob.title) continue;
+        const payload = feedTag ? { ...rawJob, tags: [...(rawJob.tags || []), feedTag] } : rawJob;
+        const { isNew } = await processAndUpsertJob(payload, ctx.profile, ctx.resumes);
+        if (isNew) created++;
+        else updated++;
+      }
+
+      const liveness = await recordFeedSync(connector.feedKey, startedAt, rawJobs.length);
+      const durationMs = Date.now() - startedAt.getTime();
+
+      await prisma.syncRun.update({
+        where: { id: syncRun.id },
+        data: {
+          status: 'SUCCESS',
+          fetchedCount: rawJobs.length,
+          newCount: created,
+          updatedCount: updated,
+          completedAt: new Date(),
+          durationMs,
+        },
+      });
+
+      if (config) {
+        const jobCount = feedTag
+          ? await prisma.jobListing.count({ where: { isActive: true, tags: { has: feedTag } } })
+          : created + updated;
+        await prisma.jobSourceConfig
+          .update({ where: { id: config.id }, data: { lastSyncedAt: new Date(), jobCount } })
+          .catch(() => {});
+      }
+
+      return { source: label, status: 'SUCCESS', fetched: rawJobs.length, new: created, updated, closed: liveness.closed };
+    } catch (err: any) {
+      const errorMessage = err?.message || String(err);
+      await prisma.syncRun.update({
+        where: { id: syncRun.id },
+        data: {
+          status: 'FAILED',
+          errorMessage,
+          completedAt: new Date(),
+          durationMs: Date.now() - startedAt.getTime(),
+        },
+      });
+      console.error(`[SyncService] Connector failed: ${label}:`, errorMessage);
+      return { source: label, status: 'FAILED', fetched: 0, new: 0, updated: 0, error: errorMessage };
+    }
+  }
+
+  async loadScoringContext(): Promise<{ profile: ScoringProfile; resumes: ResumeLike[] }> {
+    const profile = await ensureActiveProfile();
+    const resumes = await getProfileResumes(profile.id);
+    return { profile, resumes };
+  }
+
+  async syncAll(options: { force?: boolean; concurrency?: number } = {}): Promise<SyncSummary> {
     if (this.isSyncRunning && !options.force) {
       return {
         status: 'ALREADY_RUNNING',
@@ -147,153 +194,37 @@ export class SyncService {
 
     this.isSyncRunning = true;
     const startTime = Date.now();
-    let totalFetched = 0;
-    let totalNew = 0;
-    let totalUpdated = 0;
-    const connectorResults: SyncSummary['connectorResults'] = [];
 
     try {
-      // Fetch active candidate profile for matching, or ensure default profile
-      let profile = await prisma.candidateProfile.findFirst({
-        orderBy: { id: 'asc' },
-      });
-
-      if (!profile) {
-        profile = await prisma.candidateProfile.create({
-          data: {
-            name: 'Shourya Upadhyaya',
-            skills: [
-              'JavaScript', 'TypeScript', 'React', 'Next.js', 'Node.js', 'Express',
-              'PostgreSQL', 'Prisma', 'SQL', 'REST APIs', 'WebSockets', 'Redis',
-              'Docker', 'Linux', 'Git',
-            ],
-            education: {
-              degree: 'B.Tech Computer Science and Engineering',
-              institution: 'VIT Vellore',
-              graduationYear: 2028,
-            },
-            experience: {
-              target: '2027 software engineering internships',
-              preferredRoles: ['Backend Engineering Intern', 'Full-Stack Engineering Intern'],
-            },
-          },
-        });
-      }
-
+      const ctx = await this.loadScoringContext();
       const activeList = await this.getActiveConnectors();
+      const connectorResults = await mapLimit(activeList, options.concurrency ?? 3, (item) =>
+        this.syncConnector(item, ctx)
+      );
 
-      for (const item of activeList) {
-        const connector = item.connector;
-        const sourceName = connector.name || (connector as any).source || 'Unknown';
-        const syncRunStart = Date.now();
+      const ran = connectorResults.filter((r) => r.status !== 'SKIPPED');
+      const totalFetched = ran.reduce((n, r) => n + r.fetched, 0);
+      const totalNew = ran.reduce((n, r) => n + r.new, 0);
+      const totalUpdated = ran.reduce((n, r) => n + r.updated, 0);
 
-        const syncRun = await prisma.syncRun.create({
-          data: {
-            source: sourceName,
-            status: 'RUNNING',
-            startedAt: new Date(),
-          },
-        });
+      // Freshness decays daily, so scores of listings not touched by this sync drift; refresh all.
+      await rescoreAllJobs().catch((err) => console.error('[SyncService] Rescore failed:', err?.message || err));
 
-        try {
-          const rawJobs = (await connector.fetchJobs()) as RawJobPayload[];
-          let connectorNew = 0;
-          let connectorUpdated = 0;
-
-          for (const rawJob of rawJobs) {
-            const { isNew } = await processAndUpsertJob(rawJob, profile);
-            if (isNew) {
-              connectorNew++;
-            } else {
-              connectorUpdated++;
-            }
-          }
-
-          const durationMs = Date.now() - syncRunStart;
-          await prisma.syncRun.update({
-            where: { id: syncRun.id },
-            data: {
-              status: 'SUCCESS',
-              fetchedCount: rawJobs.length,
-              newCount: connectorNew,
-              updatedCount: connectorUpdated,
-              completedAt: new Date(),
-              durationMs,
-            },
-          });
-
-          if (item.configId) {
-            await prisma.jobSourceConfig.update({
-              where: { id: item.configId },
-              data: {
-                lastSyncedAt: new Date(),
-                jobCount: connectorNew + connectorUpdated,
-              },
-            }).catch(() => {});
-          }
-
-          totalFetched += rawJobs.length;
-          totalNew += connectorNew;
-          totalUpdated += connectorUpdated;
-
-          connectorResults.push({
-            source: sourceName,
-            status: 'SUCCESS',
-            fetched: rawJobs.length,
-            new: connectorNew,
-            updated: connectorUpdated,
-          });
-        } catch (err: any) {
-          const durationMs = Date.now() - syncRunStart;
-          const errorMessage = err?.message || String(err);
-
-          await prisma.syncRun.update({
-            where: { id: syncRun.id },
-            data: {
-              status: 'FAILED',
-              errorMessage,
-              completedAt: new Date(),
-              durationMs,
-            },
-          });
-
-          console.error(`[SyncService] Connector failed: ${sourceName}:`, errorMessage);
-
-          connectorResults.push({
-            source: sourceName,
-            status: 'FAILED',
-            fetched: 0,
-            new: 0,
-            updated: 0,
-            error: errorMessage,
-          });
-        }
-      }
-
-      // Record audit log
       await prisma.auditLog.create({
         data: {
           action: 'JOB_SYNC_EXECUTED',
           entityId: 'SYSTEM',
-          metadata: {
-            totalFetched,
-            totalNew,
-            totalUpdated,
-            results: connectorResults,
-          },
+          metadata: { totalFetched, totalNew, totalUpdated, results: connectorResults as any },
         },
       });
 
-      const failedCount = connectorResults.filter((r) => r.status === 'FAILED').length;
-      let overallStatus: SyncSummary['status'] = 'SUCCESS';
-      if (failedCount === connectorResults.length && connectorResults.length > 0) {
-        overallStatus = 'FAILED';
-      } else if (failedCount > 0) {
-        overallStatus = 'PARTIAL';
-      }
+      const failedCount = ran.filter((r) => r.status === 'FAILED').length;
+      let status: SyncSummary['status'] = 'SUCCESS';
+      if (failedCount > 0 && failedCount === ran.length) status = 'FAILED';
+      else if (failedCount > 0) status = 'PARTIAL';
 
       return {
-        status: overallStatus,
+        status,
         totalFetched,
         totalNew,
         totalUpdated,
@@ -311,7 +242,7 @@ export class SyncService {
       orderBy: { startedAt: 'desc' },
     });
 
-    const totalJobs = await prisma.jobListing.count();
+    const totalJobs = await prisma.jobListing.count({ where: { isActive: true } });
     const lastSuccessRun = await prisma.syncRun.findFirst({
       where: { status: 'SUCCESS' },
       orderBy: { completedAt: 'desc' },
@@ -324,8 +255,8 @@ export class SyncService {
       totalJobs,
       lastSyncAt: lastSuccessRun?.completedAt || null,
       activeConnectors: activeList.map((item) => ({
-        name: item.connector.name || (item.connector as any).source || 'Connector',
-        source: (item.connector as any).source || 'Generic',
+        name: connectorLabel(item.connector),
+        source: item.connector.source || 'Generic',
       })),
       recentRuns,
     };

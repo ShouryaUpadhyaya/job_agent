@@ -18,7 +18,11 @@ describe('Job Sources API (/api/sources)', () => {
     expect(sourceTypes).toContain('greenhouse');
     expect(sourceTypes).toContain('ashby');
     expect(sourceTypes).toContain('lever');
-    expect(sourceTypes).toContain('arbeitnow');
+    expect(sourceTypes).toContain('smartrecruiters');
+    expect(sourceTypes).toContain('workable');
+    expect(sourceTypes).toContain('remotive');
+    expect(sourceTypes).not.toContain('linkedin');
+    expect(sourceTypes).not.toContain('wellfound');
   });
 
   it('POST /api/sources should create a valid new source', async () => {
