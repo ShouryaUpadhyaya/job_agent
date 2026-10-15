@@ -1,4 +1,5 @@
 import { syncService } from '../jobs/syncService';
+import { checkStaleListings } from '../jobs/liveness';
 
 export type ConnectorFn = () => Promise<void> | void;
 
@@ -78,6 +79,14 @@ export function initScheduler(intervalMinutes?: number): ConnectorScheduler {
       console.log(`[Scheduler] Sync finished: ${result.status} (Fetched: ${result.totalFetched}, New: ${result.totalNew}, Updated: ${result.totalUpdated})`);
     } catch (err) {
       console.error('[Scheduler] Sync error:', err);
+    }
+
+    // Close listings older than a week that have been taken down (never fetches LinkedIn/Naukri)
+    try {
+      const liveness = await checkStaleListings({ limit: 40, olderThanDays: 7 });
+      console.log('[Scheduler] Liveness check:', liveness);
+    } catch (err) {
+      console.error('[Scheduler] Liveness check error:', err);
     }
 
     // Import new rows from the Wellfound applications.csv (idempotent; never downgrades a stage)
