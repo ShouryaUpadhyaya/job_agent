@@ -124,9 +124,13 @@ export class SyncService {
       const feedTag = connector.feedKey ? `${FEED_TAG_PREFIX}${connector.feedKey}` : null;
       let created = 0;
       let updated = 0;
+      const seen = new Set<string>();
 
       for (const rawJob of rawJobs) {
         if (!rawJob || !rawJob.externalId || !rawJob.url || !rawJob.title) continue;
+        // Some boards list one posting once per location; upsert it once.
+        if (seen.has(rawJob.externalId)) continue;
+        seen.add(rawJob.externalId);
         const payload = feedTag ? { ...rawJob, tags: [...(rawJob.tags || []), feedTag] } : rawJob;
         const { isNew } = await processAndUpsertJob(payload, ctx.profile, ctx.resumes);
         if (isNew) created++;
