@@ -95,19 +95,27 @@ This document maintains an accurate record of external open-source projects, API
 - **License / Terms:** Google APIs Terms of Service; read-only scope `https://www.googleapis.com/auth/gmail.readonly`.
 - **Implementation in Code:** `server/src/email/service.ts`, `server/src/email/classifier.ts`, `server/src/api/gmail.ts`
 - **Modifications / Enhancements:**
-  - Standardized OAuth2 flow storing refresh tokens in `ConnectedAccount` table.
-  - Multi-class heuristic classification engine recognizing interview invitations, HackerRank assessments, offers, rejections, and LinkedIn connection acceptances.
-  - Auto-correlates inbound events with `JobApplication` (advancing pipeline stage) and `NetworkingContact` (drafting referral requests).
+  - OAuth2 flow with a single-use `state`, storing tokens (unencrypted) in the `ConnectedAccount` table.
+  - 12-class rule-based classifier (ATS-aware) recognizing confirmations, assessments, interview invitations, offers, rejections, recruiter outreach, referral responses, LinkedIn connection acceptances and job alerts, with optional Gemini refinement.
+  - Correlates events with `JobApplication` (forward-only stage changes) and `NetworkingContact`; job alerts become listings.
 
 ### 2.7 Wellfound & LinkedIn Normalizers and Application Checklists
-- **Origin / Source:** Startup ecosystem & LinkedIn job postings
+- **Origin / Source:** Job details the user pastes (no request is made to LinkedIn or Wellfound)
 - **Implementation in Code:** `server/src/connectors/wellfound.ts`, `server/src/connectors/linkedin.ts`
 - **Modifications / Enhancements:**
-  - Extracts numeric job IDs and sanitizes descriptions.
+  - Extracts numeric job IDs from pasted URLs and sanitizes pasted descriptions.
   - Distinguishes Easy Apply vs External ATS portals.
   - Generates pre-application checklist for candidates prior to official browser handoff.
 
 ---
+
+### 2.8 Wellfound Auto-Apply Script (git submodule)
+- **Origin / Source:** `https://github.com/ankitbaghel01/wellfound_autoApply` (submodule `wellfound_autoApply/`, kept unmodified; check the upstream repository for its license)
+- **Implementation in Code:** `scripts/wellfound/build-wellfound-paste.js` patches the console script in memory; `scripts/wellfound/runner.js` drives it with Playwright in the user's Chrome; `scripts/wellfound/agent.js` runs it on the host for a containerised server.
+- **Modifications / Enhancements:** explicit `DRY_RUN` injection, IST daily cap, scoped selectors, per-run logs and diagnostics, profile-driven config. Playwright is installed into the submodule (`npm run wellfound:install`).
+
+### 2.9 Multi-site Auto-Apply (git submodule, not used by the app)
+- **Origin / Source:** `https://github.com/Anshul439/job-auto-apply` (submodule `job-auto-apply/`). Only reachable through the root `job-apply:*` npm scripts; the server and dashboard do not use it.
 
 ## 3. Libraries & Dependencies
 
@@ -121,7 +129,7 @@ This document maintains an accurate record of external open-source projects, API
 | `tailwindcss` | `^4` | Utility-first styling | MIT |
 | `rss-parser` | `^3.13.0` | RSS/Atom feed parsing | MIT |
 | `pdf-parse` | `^2.4.5` | PDF text extraction | MIT |
-| `multer` | `^1.4.5-lts.1` | Multipart file upload handling | MIT |
+| `multer` | `^2.4.0` | Multipart file upload handling | MIT |
 | `googleapis` | `^185.0.0` | Official Google APIs client (Gmail, OAuth2) | Apache-2.0 |
 | `google-auth-library` | `^11.2.0` | Google authentication & token management | Apache-2.0 |
 

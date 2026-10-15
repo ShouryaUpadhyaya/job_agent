@@ -105,7 +105,7 @@ During research, several other well-maintained community projects were identifie
 
 | Candidate / Project | Tech / Interface | Strengths | Weaknesses | Engineering Recommendation |
 |---|---|---|---|---|
-| **Wellfound Official Search & Public Pages** | HTTP / Browser | Publicly accessible startup listings, high accuracy on early-stage and seed/Series A equity roles | No public candidate write API | **ADOPT USER-ASSISTED WORKFLOW**: Ingest structured listing metadata, check eligibility against candidate profile, prepare application checklist, and execute clean browser handoff for human submission. |
+| **Wellfound Official Search & Public Pages** | HTTP / Browser | Publicly accessible startup listings, high accuracy on early-stage and seed/Series A equity roles | No public candidate write API | **ADOPT USER-ASSISTED WORKFLOW**: Ingest structured listing metadata, check eligibility against candidate profile, prepare application checklist, and execute clean browser handoff for human submission. *(Later superseded: the app now drives the user's own Chrome session with a Playwright runner, dry run by default; there is no Wellfound listing feed.)* |
 | **`wellfound_graphqlscout` / Unofficial GraphQL** | Reverse-engineered GraphQL | Extracts deep company and compensation data | Fragile; subject to breaking changes and Cloudflare anti-bot blocks | **USE AS FALLBACK / STUDY**: Leverage its GraphQL payload structures as reference for field mapping without violating platform terms. |
 | **Apify Wellfound Actor** | Cloud Scraping Actor | Managed proxy rotation, anti-bot bypass | Paid SaaS subscription; violates self-hosted offline principles | **REJECT**: Keep system self-contained on local machine without subscription dependencies. |
 
@@ -119,6 +119,12 @@ During research, several other well-maintained community projects were identifie
 ---
 
 ## Final Integrated Architecture Plan
+
+> **Status note (Phase 8).** This was the plan at research time. What was built differs: Gmail
+> tokens are stored unencrypted in the local database (no AES encryption), the classifier has 12
+> classes, LinkedIn postings are never fetched (they come only from alert emails, search links
+> and pasted details), and Wellfound applying is automated on the user's own account (dry run by
+> default). See `README.md` and `SECURITY.md` for the current design.
 
 Based on the multi-layer research:
 1. **Gmail Subsystem**: Official Google OAuth 2.0 flow (`googleapis`), narrow read-only scope (`gmail.readonly`), AES-256 encrypted refresh tokens, incremental message synchronization, and 13-category rule-based email classifier with confidence metrics.

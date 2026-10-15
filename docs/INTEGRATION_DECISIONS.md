@@ -56,3 +56,16 @@ This document records the architectural decisions, trade-offs, adapter designs, 
 - **Context:** Automated systems must never execute legally binding or consequential actions without explicit human authorization.
 - **Decision:** Enforce `isApproved: true` at the database and API layer (`server/src/api/applications.ts`). Any attempt to submit an application without `isApproved === true` returns an immediate `403 Forbidden` error.
 - **Rationale:** Frontend safeguards alone are insufficient; the backend API strictly enforces permission boundaries.
+- **Scope note:** This gate covers the copilot submit endpoint. Wellfound auto-apply is a separate, user-started flow: it defaults to dry run, and a live run requires an explicit confirmation in the UI and `confirmLive: true` in the API (see ADR 005).
+
+---
+
+## ADR 005: Compliance-first sourcing and user-owned automation
+
+- **Context:** Earlier versions scraped LinkedIn's guest API, returned mock jobs when it failed, generated placeholder networking contacts, and inserted demo emails when a Gmail sync failed.
+- **Decision:**
+  1. No automated access to LinkedIn or Naukri. Their jobs enter only through job-alert emails (parsed locally), search links the user opens, and pasted details.
+  2. Job boards only through official public APIs (Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Remotive, Remote OK, Arbeitnow) and GitHub's public API for people discovery.
+  3. No fabricated jobs, contacts or emails; contact emails only from Gmail senders, user input, or GitHub profiles.
+  4. Wellfound automation runs on the host (where Chrome and a display exist) against the user's own session, through a token-protected host agent when the server is containerised. Dry run is the default.
+- **Rationale:** Terms-of-service compliance and data the user can trust. Cleanup scripts in `server/src/scripts/` remove data created by the earlier versions.
