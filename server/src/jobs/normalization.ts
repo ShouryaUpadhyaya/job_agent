@@ -3,8 +3,15 @@ import { JobListing, CandidateProfile } from '@prisma/client';
 import { matchJob } from '../matching/engine';
 import { cleanHtml, canonicalizeUrl } from '../connectors/utils';
 import { RawJobPayload } from '../connectors/types';
+import { companyKey } from '../lib/company';
 
-export type RawJobListing = Omit<JobListing, 'id' | 'createdAt' | 'updatedAt' | 'retrievedAt'>;
+export type RawJobListing = Pick<
+  JobListing,
+  | 'externalId' | 'source' | 'title' | 'company' | 'url' | 'description' | 'location' | 'status' | 'score'
+  | 'matchReasons' | 'matchedSkills' | 'missingSkills' | 'publishedAt' | 'tags' | 'companyKey' | 'isInternship'
+>;
+
+const INTERNSHIP_RE = /\b(intern|internship|interns|trainee|apprentice)\b/i;
 
 export interface IngestionResult {
   listing: JobListing;
@@ -31,7 +38,17 @@ export function cleanJobPayload(raw: Partial<RawJobPayload | JobListing> & { ext
     matchReasons: (raw as any).matchReasons || [],
     matchedSkills: (raw as any).matchedSkills || [],
     missingSkills: (raw as any).missingSkills || [],
+    publishedAt: toDate((raw as any).publishedAt),
+    tags: Array.isArray((raw as any).tags) ? (raw as any).tags.map(String) : [],
+    companyKey: companyKey(cleanCompany),
+    isInternship: INTERNSHIP_RE.test(cleanTitle) || INTERNSHIP_RE.test(((raw as any).tags || []).join(' ')),
   };
+}
+
+function toDate(value: unknown): Date | null {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(String(value));
+  return isNaN(d.getTime()) ? null : d;
 }
 
 export async function processAndUpsertJob(
@@ -83,7 +100,14 @@ export async function processAndUpsertJob(
       matchReasons: cleaned.matchReasons,
       matchedSkills: cleaned.matchedSkills,
       missingSkills: cleaned.missingSkills,
+      publishedAt: cleaned.publishedAt ?? undefined,
+      tags: cleaned.tags,
+      companyKey: cleaned.companyKey,
+      isInternship: cleaned.isInternship,
       retrievedAt: new Date(),
+      // Seen again in a feed: the listing is live.
+      lastSeenAt: new Date(),
+      missedSyncs: 0,
     },
     create: {
       ...cleaned,

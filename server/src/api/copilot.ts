@@ -166,7 +166,7 @@ copilotRouter.post('/copilot/generate-answer', async (req: Request, res: Respons
       return res.status(404).json({ error: 'Job listing not found' });
     }
 
-    const job: JobListing = foundJob || {
+    const job: JobListing = foundJob || ({
       id: 'generic',
       externalId: 'generic',
       source: 'manual',
@@ -183,7 +183,7 @@ copilotRouter.post('/copilot/generate-answer', async (req: Request, res: Respons
       retrievedAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-    };
+    } as unknown as JobListing);
 
     let profile = candidateProfileId
       ? await prisma.candidateProfile.findUnique({ where: { id: candidateProfileId } })

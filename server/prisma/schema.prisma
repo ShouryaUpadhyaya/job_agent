@@ -14,40 +14,86 @@ model User {
 }
 
 model JobListing {
-  id          String   @id @default(uuid())
-  externalId  String
-  source      String
-  title       String
-  company     String
-  url         String
-  description String
-  location    String?
-  status      String   @default("NEW")
-  score       Int      @default(0)
-  matchReasons String[]
-  matchedSkills String[]
-  missingSkills String[]
-  retrievedAt DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  applications JobApplication[]
+  id                 String              @id @default(uuid())
+  externalId         String
+  source             String
+  title              String
+  company            String
+  url                String
+  description        String
+  location           String?
+  status             String              @default("NEW")
+  score              Int                 @default(0)
+  matchReasons       String[]
+  matchedSkills      String[]
+  missingSkills      String[]
+  retrievedAt        DateTime            @default(now())
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  applications       JobApplication[]
   networkingContacts NetworkingContact[]
 
+  // Freshness & liveness
+  publishedAt   DateTime?
+  lastSeenAt    DateTime  @default(now())
+  isActive      Boolean   @default(true)
+  closedAt      DateTime?
+  closedReason  String?
+  lastCheckedAt DateTime?
+  missedSyncs   Int       @default(0)
+
+  // Classification & user state (status above is the match classification)
+  tags           String[]
+  employmentType String? // "INTERNSHIP", "FULL_TIME", "CONTRACT", "PART_TIME"
+  isInternship   Boolean  @default(false)
+  companyKey     String   @default("")
+  userStatus     String   @default("NONE") // "NONE", "SAVED", "DISMISSED"
+  bestResumeId   String?
+  scoresByResume Json?
+
   @@unique([externalId, source])
+  @@index([companyKey])
+  @@index([isActive, score])
 }
 
 model CandidateProfile {
-  id             String           @id @default(uuid())
-  name           String
-  email          String?
-  targetRole     String?          @default("Software Engineer Intern")
-  targetGradYear Int?             @default(2028)
-  rawResume      String?
-  skills         String[]
-  experience     Json?
-  education      Json?
-  applications   JobApplication[]
-  documents      Document[]
+  id                 String           @id @default(uuid())
+  name               String
+  email              String?
+  targetRole         String?          @default("Software Engineer Intern")
+  targetGradYear     Int?             @default(2028)
+  rawResume          String?
+  skills             String[]
+  experience         Json?
+  education          Json?
+  phone              String?
+  location           String?
+  school             String?
+  githubUrl          String?
+  linkedinUrl        String?
+  portfolioUrl       String?
+  xUrl               String?
+  preferredLocations String[]         @default(["India", "Remote"])
+  remoteOk           Boolean          @default(true)
+  // Free-form answers used by auto-apply (CTC, notice period, work auth, gender, etc.)
+  applicationAnswers Json?
+  applications       JobApplication[]
+  documents          Document[]
+  resumes            Resume[]
+}
+
+model Resume {
+  id                 String           @id @default(uuid())
+  candidateProfileId String
+  candidateProfile   CandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
+  label              String // e.g. "Backend", "Full-stack"
+  targetCategory     String? // e.g. "backend", "fullstack", "frontend", "devops"
+  content            String
+  skills             String[]
+  fileName           String?
+  isDefault          Boolean          @default(false)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
 }
 
 model JobApplication {
@@ -62,15 +108,20 @@ model JobApplication {
   notes              String?
   appliedUrl         String?
   submittedAt        DateTime?
+  companyKey         String           @default("")
+  source             String? // "manual", "wellfound", "email", "import"
+  lastEmailAt        DateTime?
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   documents          Document[]
   emailEvents        EmailEvent[]
+
+  @@index([companyKey])
 }
 
 model Document {
   id                 String           @id @default(uuid())
-  type               String           // "RESUME", "COVER_LETTER", "TAILORED_RESUME"
+  type               String // "RESUME", "COVER_LETTER", "TAILORED_RESUME"
   version            Int              @default(1)
   content            String
   candidateProfileId String
@@ -90,23 +141,23 @@ model AuditLog {
 }
 
 model SyncRun {
-  id            String    @id @default(uuid())
-  source        String
-  status        String    // "RUNNING", "SUCCESS", "FAILED", "PARTIAL"
-  fetchedCount  Int       @default(0)
-  newCount      Int       @default(0)
-  updatedCount  Int       @default(0)
-  errorMessage  String?
-  startedAt     DateTime  @default(now())
-  completedAt   DateTime?
-  durationMs    Int?
+  id           String    @id @default(uuid())
+  source       String
+  status       String // "RUNNING", "SUCCESS", "FAILED", "PARTIAL"
+  fetchedCount Int       @default(0)
+  newCount     Int       @default(0)
+  updatedCount Int       @default(0)
+  errorMessage String?
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+  durationMs   Int?
 }
 
 model JobSourceConfig {
   id           String    @id @default(uuid())
-  sourceType   String    // "greenhouse", "ashby", "lever", "arbeitnow", "wellfound", "linkedin"
-  name         String    // e.g. "Cloudflare", "Linear", "Spotify", "Netflix"
-  boardToken   String    // e.g. "cloudflare", "linear", "spotify", "netflix"
+  sourceType   String // "greenhouse", "ashby", "lever", "arbeitnow", "wellfound", "linkedin"
+  name         String // e.g. "Cloudflare", "Linear", "Spotify", "Netflix"
+  boardToken   String // e.g. "cloudflare", "linear", "spotify", "netflix"
   enabled      Boolean   @default(true)
   lastSyncedAt DateTime?
   jobCount     Int       @default(0)
@@ -118,7 +169,7 @@ model JobSourceConfig {
 
 model ConnectedAccount {
   id           String    @id @default(uuid())
-  provider     String    // "gmail", "linkedin"
+  provider     String // "gmail", "linkedin"
   email        String?
   accessToken  String?
   refreshToken String?
@@ -134,64 +185,78 @@ model ConnectedAccount {
 }
 
 model NetworkingContact {
-  id              String   @id @default(uuid())
-  name            String
-  company         String
-  role            String
-  profileUrl      String
-  headline        String?
-  team            String?
-  vitAlumni       Boolean  @default(false)
-  outreachAngle   String?
-  relevanceScore  Int      @default(0)
-  targetJobId     String?
-  targetJob       JobListing? @relation(fields: [targetJobId], references: [id])
-  status          String   @default("RESEARCHED") // "RESEARCHED", "READY_TO_CONNECT", "REQUEST_SENT", "ACCEPTED", "MESSAGE_DRAFTED", "MESSAGE_SENT", "REPLIED", "REFERRAL_REQUESTED", "REFERRED", "NOT_INTERESTED", "FOLLOW_UP_DUE"
-  notes           String?
-  requestSentAt   DateTime?
-  acceptedAt      DateTime?
-  lastContactAt   DateTime?
-  nextFollowUpAt  DateTime?
-  verified        Boolean  @default(true)
-  messages        NetworkingMessage[]
-  emailEvents     EmailEvent[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String              @id @default(uuid())
+  name           String
+  company        String
+  companyKey     String              @default("")
+  role           String
+  profileUrl     String?
+  linkedinUrl    String?
+  xUrl           String?
+  githubUrl      String?
+  email          String?
+  emailSource    String? // "gmail", "github", "manual"
+  school         String?
+  persona        String              @default("OTHER") // "ENGINEER", "FULLSTACK", "RECRUITER", "FOUNDER_CXO", "MANAGER", "OTHER"
+  source         String              @default("MANUAL") // "MANUAL", "GMAIL", "GITHUB", "IMPORT"
+  headline       String?
+  team           String?
+  vitAlumni      Boolean             @default(false)
+  outreachAngle  String?
+  relevanceScore Int                 @default(0)
+  targetJobId    String?
+  targetJob      JobListing?         @relation(fields: [targetJobId], references: [id])
+  status         String              @default("RESEARCHED") // "RESEARCHED", "READY_TO_CONNECT", "REQUEST_SENT", "ACCEPTED", "MESSAGE_DRAFTED", "MESSAGE_SENT", "REPLIED", "REFERRAL_REQUESTED", "REFERRED", "NOT_INTERESTED", "FOLLOW_UP_DUE"
+  notes          String?
+  requestSentAt  DateTime?
+  acceptedAt     DateTime?
+  lastContactAt  DateTime?
+  nextFollowUpAt DateTime?
+  verified       Boolean             @default(false)
+  messages       NetworkingMessage[]
+  emailEvents    EmailEvent[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([companyKey])
 }
 
 model NetworkingMessage {
-  id          String   @id @default(uuid())
-  contactId   String
-  contact     NetworkingContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  type        String   // "CONNECTION_REQUEST", "REFERRAL_FOLLOWUP", "FOLLOWUP_REMINDER"
-  content     String
-  status      String   @default("DRAFT") // "DRAFT", "APPROVED", "SENT"
-  sentAt      DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String            @id @default(uuid())
+  contactId String
+  contact   NetworkingContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  type      String // "CONNECTION_REQUEST", "REFERRAL_FOLLOWUP", "FOLLOWUP_REMINDER"
+  content   String
+  status    String            @default("DRAFT") // "DRAFT", "APPROVED", "SENT"
+  sentAt    DateTime?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
 }
 
 model EmailEvent {
-  id                  String   @id @default(uuid())
-  messageId           String   @unique
+  id                  String             @id @default(uuid())
+  messageId           String             @unique
   threadId            String?
   sender              String
   senderName          String?
   subject             String
   snippet             String?
+  body                String?
+  importance          String             @default("NORMAL") // "HIGH", "NORMAL", "LOW"
+  isDemo              Boolean            @default(false)
   receivedAt          DateTime
-  classification      String   // APPLICATION_CONFIRMATION, INTERVIEW_INVITATION, ASSESSMENT, REJECTION, OFFER, RECRUITER_OUTREACH, REFERRAL_RESPONSE, LINKEDIN_CONNECTION_ACCEPTED, FOLLOW_UP_REQUIRED, JOB_ALERT, UNRELATED, UNKNOWN
-  confidence          Float    @default(0.0)
+  classification      String // APPLICATION_CONFIRMATION, INTERVIEW_INVITATION, ASSESSMENT, REJECTION, OFFER, RECRUITER_OUTREACH, REFERRAL_RESPONSE, LINKEDIN_CONNECTION_ACCEPTED, FOLLOW_UP_REQUIRED, JOB_ALERT, UNRELATED, UNKNOWN
+  confidence          Float              @default(0.0)
   explanation         String?
   suggestedAction     String?
   company             String?
   role                String?
   jobApplicationId    String?
-  jobApplication      JobApplication? @relation(fields: [jobApplicationId], references: [id])
+  jobApplication      JobApplication?    @relation(fields: [jobApplicationId], references: [id])
   networkingContactId String?
   networkingContact   NetworkingContact? @relation(fields: [networkingContactId], references: [id])
-  isProcessed         Boolean  @default(false)
-  createdAt           DateTime @default(now())
+  isProcessed         Boolean            @default(false)
+  createdAt           DateTime           @default(now())
 }
 
 model DailyJobSearchSummary {
@@ -210,5 +275,19 @@ model DailyJobSearchSummary {
   @@unique([summaryDate])
 }
 
-
-
+model WellfoundRun {
+  id              String    @id @default(uuid())
+  mode            String // "DRY_RUN", "LIVE"
+  visible         Boolean   @default(false)
+  maxApplications Int       @default(0)
+  status          String    @default("STARTING") // "STARTING", "RUNNING", "SUCCEEDED", "FAILED", "STOPPED"
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+  exitCode        Int?
+  logPath         String?
+  diagnosticsDir  String?
+  submittedCount  Int       @default(0)
+  skippedCount    Int       @default(0)
+  errorCount      Int       @default(0)
+  error           String?
+}

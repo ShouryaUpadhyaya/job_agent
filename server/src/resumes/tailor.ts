@@ -1,4 +1,5 @@
 import { CandidateProfile, JobListing } from '@prisma/client';
+import { candidateContext, generateText, hasPlaceholders, toPlainText, untrusted, UNTRUSTED_NOTICE } from '../lib/gemini';
 
 export interface TailoredResumeResult {
   headline: string;
@@ -135,137 +136,93 @@ ${signoff}
 }
 
 /**
- * Generates an application cover letter using Google Gemini and the candidate writing agent prompt.
+ * Generates an application cover letter with Gemini, grounded in the candidate's resume.
+ * Falls back to the deterministic template when Gemini is unavailable.
  */
 export async function tailorCoverLetterWithGemini(
   profile: CandidateProfile,
   job: JobListing,
   question?: string,
-  wordLimit?: number
+  wordLimit?: number,
+  resumeText?: string | null
 ): Promise<TailoredCoverLetterResult> {
-  const geminiKey = process.env.GEMINI_KEY;
-  if (!geminiKey) {
-    return tailorCoverLetter(profile, job);
+  const prompt = `You are my job application writing agent. My resume below is the only source of truth for my skills, experience, projects, education and achievements.
+
+## Task
+Write a concise, personalised answer to the application question "${question || 'What interests you about working for this company?'}" that I can submit directly.
+
+${UNTRUSTED_NOTICE}
+
+### Role
+- Company: ${job.company}
+- Title: ${job.title}
+${untrusted('job-description', job.description, 3000)}
+
+### Me
+${candidateContext(profile, resumeText)}
+
+### Rules
+1. Identify the company's product domain and the tech in the listing.
+2. Pick the 2-3 most relevant items from my resume. Prefer production work, measurable impact and ownership.
+3. Explain why this role interests me and what I can contribute, tied to that evidence.
+4. ${wordLimit || '90-130'} words, first person, warm and professional. No clichés or keyword lists.
+5. Plain text only: no markdown, asterisks, bullets or placeholder brackets.
+6. Start with "Dear ${job.company} team," then 2 short paragraphs, then "Best regards,\n${profile.name}".
+7. Never invent skills, companies, metrics or company facts.
+
+Return only the final answer.`;
+
+  const text = await generateText(prompt, { minLength: 50 });
+  if (text && !hasPlaceholders(text)) {
+    const cleanText = toPlainText(text);
+    return {
+      recipient: `${job.company} Hiring Team`,
+      subject: `Application for ${job.title} — ${profile.name}`,
+      salutation: `Dear ${job.company} team,`,
+      body: cleanText,
+      signoff: `Best regards,\n${profile.name}`,
+      formattedMarkdown: cleanText,
+    };
   }
-
-  const prompt = `You are my job application writing agent. You have access to my resume. Use it as the source of truth for my skills, experience, projects, education, and achievements.
-
-## Task: Generate Tailored Job Application Answer
-Generate a concise, personalised answer to the application question "${question || 'What interests you about working for this company?'}" that I can submit directly.
-
-### Inputs
-- Company Name: ${job.company}
-- Target Role: ${job.title}
-- Job Listing & Details: ${job.description}
-- Candidate Resume & Profile:
-${JSON.stringify(profile, null, 2)}
-
-### Workflow & Rules
-1. Extract the company's product domain, engineering challenges, and relevant tech stack from the listing.
-2. Ground your response in my actual resume. Identify the 2-3 most relevant skills or projects. Prioritize production experience, measurable impact, and technical ownership.
-3. Explain why the role and company's work specifically interests me, connecting it directly to evidence from my experience. Explain what I can contribute and what I want to learn.
-4. Style & Length:
-   - Target ${wordLimit || '90–130'} words.
-   - First-person language ("I"), natural, warm, and professional English.
-   - Avoid generic corporate language, clichés, empty praise, and technical keyword lists.
-   - Plain text only: NO markdown, NO asterisks (**), NO bullet points, NO placeholder brackets like [Company].
-5. Structure:
-   - Salutation: "Dear ${job.company} team,"
-   - Body: 2 concise paragraphs.
-   - Sign-off: "Best regards,\n${profile.name}"
-6. Validation: Never invent skills, companies, metrics, experience, or company-specific facts. Every claim must be supported by my CV.
-
-Return ONLY the final application answer ready to submit.`;
-
-  try {
-    const models = ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
-    for (const model of models) {
-      try {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-          }
-        );
-        const data: any = await res.json();
-        const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('').trim();
-        if (text && text.length > 50 && !/\[[^\]]{2,40}\]/.test(text)) {
-          const cleanText = text.replace(/\*\*|__|^#+\s*/gm, '').trim();
-          return {
-            recipient: `${job.company} Hiring Team`,
-            subject: `Application for ${job.title} — ${profile.name}`,
-            salutation: `Dear ${job.company} Hiring Team,`,
-            body: cleanText,
-            signoff: `Best regards,\n${profile.name}`,
-            formattedMarkdown: cleanText,
-          };
-        }
-      } catch (e) {}
-    }
-  } catch (err) {}
-
   return tailorCoverLetter(profile, job);
 }
 
 /**
- * Generates an answer to custom application questions using Google Gemini and the candidate writing agent prompt.
+ * Answers a custom screening question with Gemini, grounded in the resume.
  */
 export async function generateAnswerWithGemini(
   profile: CandidateProfile,
   job: JobListing,
   question: string,
-  wordLimit?: number
+  wordLimit?: number,
+  resumeText?: string | null
 ): Promise<string> {
-  const geminiKey = process.env.GEMINI_KEY;
-  const prompt = `You are my job application writing agent. You have access to my resume. Use it as the source of truth for my skills, experience, projects, education, and achievements.
+  const limit = wordLimit ? `${wordLimit} words` : '50-90 words';
+  const prompt = `You are my job application writing agent. My resume below is the only source of truth.
 
-## Task: Generate Tailored Application Answer
-Generate a concise, direct, personalised answer for this specific application screening question:
-"${question}"
+## Task
+Answer this application screening question directly: "${question}"
 
-### Inputs
-- Application Question: "${question}"
-- Company Name: ${job.company}
-- Target Role: ${job.title}
-- Job Listing & Details: ${job.description}
-- Word Limit: ${wordLimit ? `${wordLimit} words` : '50–90 words'}
-- Candidate Resume & Profile:
-${JSON.stringify(profile, null, 2)}
+${UNTRUSTED_NOTICE}
 
-### Workflow & Rules
-1. Answer the exact question directly in the opening sentence.
-2. Ground the response strictly in my resume. Highlight production systems, architecture, and measurable outcomes.
-3. If I lack an exact requested skill, emphasize relevant adjacent transferable experience honestly without making false claims.
-4. Style & Length:
-   - Target ${wordLimit ? `${wordLimit} words` : '50–90 words'} (or 2-4 direct sentences).
-   - Natural, professional, first-person English.
-   - Plain text only: NO markdown, NO asterisks, NO bullet points, NO greetings or sign-offs, NO placeholder brackets.
-5. Never invent skills, achievements, or metrics.
+### Role
+- Company: ${job.company}
+- Title: ${job.title}
+${untrusted('job-description', job.description, 3000)}
 
-Return ONLY the final answer.`;
+### Me
+${candidateContext(profile, resumeText)}
 
-  if (geminiKey) {
-    const models = ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
-    for (const model of models) {
-      try {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-          }
-        );
-        const data: any = await res.json();
-        const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('').trim();
-        if (text && text.length > 20 && !/\[[^\]]{2,40}\]/.test(text)) {
-          return text.replace(/\*\*|__|^#+\s*/gm, '').trim();
-        }
-      } catch (e) {}
-    }
-  }
+### Rules
+1. Answer the exact question in the first sentence.
+2. Use evidence from my resume: production systems, architecture, measurable outcomes.
+3. If I lack a requested skill, honestly point to adjacent experience. Never invent skills, achievements or metrics.
+4. ${limit} (2-4 sentences), first person, plain text. No markdown, greetings, sign-offs or placeholder brackets.
+
+Return only the answer.`;
+
+  const text = await generateText(prompt, { minLength: 20 });
+  if (text && !hasPlaceholders(text)) return toPlainText(text);
 
   return `With my experience in ${(profile.skills || []).slice(0, 3).join(', ')}, I have built and deployed reliable production features and backend services that align directly with this role.`;
 }
