@@ -28,8 +28,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3001
 
-# Install openssl required by Prisma query engine on Alpine
-RUN apk add --no-cache openssl
+# openssl for the Prisma query engine; tzdata so TZ=Asia/Kolkata works
+RUN apk add --no-cache openssl tzdata
 
 # Copy root dependencies and server package
 COPY package.json package-lock.json ./

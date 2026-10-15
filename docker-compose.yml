@@ -38,11 +38,22 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       GEMINI_KEY: ${GEMINI_KEY:-}
       DISABLE_SCHEDULER: ${DISABLE_SCHEDULER:-false}
+      TZ: Asia/Kolkata
+      # The container has no Chrome/display: Wellfound runs go to the host agent
+      # (`npm run wellfound:agent:docker` on the host, same WELLFOUND_AGENT_TOKEN in .env).
+      WELLFOUND_EXECUTOR: agent
+      WELLFOUND_AGENT_URL: ${WELLFOUND_AGENT_URL:-http://host.docker.internal:3002}
+      WELLFOUND_AGENT_TOKEN: ${WELLFOUND_AGENT_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "3001:3001"
     volumes:
       - ./wellfound_autoApply:/app/wellfound_autoApply
       - ./scripts:/app/scripts
+      # written by the host agent; read-only here so the container never creates root-owned files
+      - ./logs:/app/logs:ro
+      - ./diagnostics:/app/diagnostics:ro
     networks:
       - job_agent_net
 
@@ -61,6 +72,7 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
+      TZ: Asia/Kolkata
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
     ports:
       - "3000:3000"
