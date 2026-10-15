@@ -1,37 +1,59 @@
-import React from 'react';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { describe, it, expect, afterEach } from 'vitest';
-import ApplicationCopilot from './ApplicationCopilot';
+import React from "react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
+import ApplicationCopilot from "./ApplicationCopilot";
+
+const job = { id: "job-1", title: "Backend Intern", company: "Acme", url: "https://acme.example/jobs/1" };
+
+function jsonResponse(body: unknown, status = 200) {
+  return { ok: status < 400, status, text: async () => JSON.stringify(body) };
+}
+
+beforeEach(() => {
+  global.fetch = vi.fn();
+});
 
 afterEach(() => {
   cleanup();
+  vi.resetAllMocks();
 });
 
-describe('ApplicationCopilot', () => {
-  it('should allow users to view the drafted cover letter', () => {
-    render(<ApplicationCopilot initialCoverLetter="Dear Hiring Manager," />);
-    const textarea = screen.getByDisplayValue('Dear Hiring Manager,');
-    expect(textarea).toBeTruthy();
+describe("ApplicationCopilot", () => {
+  it("shows the drafted cover letter and never claims to submit", () => {
+    render(<ApplicationCopilot job={job} initialCoverLetter="Dear Acme team," />);
+    expect(screen.getByDisplayValue("Dear Acme team,")).toBeTruthy();
+    expect(screen.queryByText(/Submitted Successfully/i)).toBeNull();
+    expect(screen.getByText(/Nothing is sent from this page/)).toBeTruthy();
   });
 
-  it('should enable the Approve and Submit button only when checkbox is checked', () => {
-    render(<ApplicationCopilot />);
-    const submitButton = screen.getByText('Approve and Submit') as HTMLButtonElement;
-    expect(submitButton.disabled).toBe(true);
-
-    const checkbox = screen.getByLabelText('I approve this cover letter and application details');
-    fireEvent.click(checkbox);
-    expect(submitButton.disabled).toBe(false);
+  it("regenerates the letter from the server", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse({ body: "Fresh letter" }));
+    render(<ApplicationCopilot job={job} />);
+    fireEvent.click(screen.getByText("Generate from my resume"));
+    await waitFor(() => expect(screen.getByDisplayValue("Fresh letter")).toBeTruthy());
+    const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(url)).toContain("/api/copilot/tailor-cover-letter");
+    expect(JSON.parse(init.body).jobListingId).toBe("job-1");
   });
 
-  it('should change button text to Submitted Successfully after clicking', () => {
-    render(<ApplicationCopilot />);
-    const checkbox = screen.getByLabelText('I approve this cover letter and application details');
-    fireEvent.click(checkbox);
-    
-    const submitButton = screen.getByText('Approve and Submit');
-    fireEvent.click(submitButton);
+  it("records the application as applied, advancing an existing pipeline entry", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: "app-1", duplicate: true, stage: "BOOKMARKED" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "app-1", stage: "APPLIED" }));
+    const onApplied = vi.fn();
+    render(<ApplicationCopilot job={job} onApplied={onApplied} />);
 
-    expect(screen.getByText('Submitted Successfully')).toBeTruthy();
+    fireEvent.click(screen.getByText(/mark as applied/));
+    await waitFor(() => expect(screen.getByText("Marked as applied")).toBeTruthy());
+    expect(fetchMock.mock.calls[1][1].method).toBe("PATCH");
+    expect(onApplied).toHaveBeenCalled();
+  });
+
+  it("shows server errors inline", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse({ error: "Job listing not found" }, 404));
+    render(<ApplicationCopilot job={job} />);
+    fireEvent.click(screen.getByText("Generate from my resume"));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Job listing not found"));
   });
 });

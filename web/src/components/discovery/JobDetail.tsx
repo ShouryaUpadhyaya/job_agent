@@ -227,7 +227,12 @@ export default function JobDetail({ job, profile, onUserStatus, onPipelineChange
 
         {showCopilot && (
           <div className="mt-8 pt-6 border-t border-gray-200">
-            <ApplicationCopilot key={job.id} initialCoverLetter={draftCoverLetter(current, profile)} />
+            <ApplicationCopilot
+              key={job.id}
+              job={current}
+              initialCoverLetter={draftCoverLetter(current, profile)}
+              onApplied={onPipelineChanged}
+            />
           </div>
         )}
       </div>
