@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from "react";
 import JobDiscovery from "./JobDiscovery";
 import ApplicationsPipeline from "./ApplicationsPipeline";
-import SourcesManager from "./SourcesManager";
 import ProfileManager from "./ProfileManager";
 import NetworkingCrm from "./NetworkingCrm";
 import GmailSync from "./GmailSync";
@@ -17,7 +16,6 @@ const TABS = [
   { id: "NETWORKING", label: "🤝 Networking CRM" },
   { id: "GMAIL", label: "📬 Gmail Sync" },
   { id: "BRIEFING", label: "📰 Daily Briefing" },
-  { id: "SOURCES", label: "🏢 Job Sources" },
   { id: "PROFILE", label: "👤 Profile & Resume" },
 ] as const;
 
@@ -31,15 +29,18 @@ function useTabParam(): [TabId, (tab: TabId) => void] {
 
   useEffect(() => {
     const fromUrl = new URLSearchParams(window.location.search).get("tab");
+    // Source management moved into Job Discovery; old ?tab=SOURCES links open it there.
+    const mapped = fromUrl === "SOURCES" ? "DISCOVERY" : fromUrl;
     // Read after hydration (the server render has no URL), so a one-off sync setState is intended.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (fromUrl && TABS.some((t) => t.id === fromUrl)) setTab(fromUrl as TabId);
+    if (mapped && TABS.some((t) => t.id === mapped)) setTab(mapped as TabId);
   }, []);
 
   const select = (next: TabId) => {
     setTab(next);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", next);
+    url.searchParams.delete("sources");
     window.history.replaceState(null, "", url.toString());
   };
 
@@ -51,6 +52,19 @@ export default function Dashboard() {
   // Bumped when another tab changes data the job feed depends on (sources, profile).
   const [refreshKey, setRefreshKey] = useState(0);
   const refreshJobs = () => setRefreshKey((k) => k + 1);
+  // `?tab=SOURCES` (old tab) or `?sources=1` opens the Manage sources drawer once.
+  const [sourcesDeepLink, setSourcesDeepLink] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("tab") === "SOURCES" || params.get("sources") === "1") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSourcesDeepLink(true);
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", "DISCOVERY");
+      url.searchParams.delete("sources");
+      window.history.replaceState(null, "", url.toString());
+    }
+  }, []);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-900 font-sans">
@@ -82,7 +96,7 @@ export default function Dashboard() {
         </div>
       </nav>
 
-      {activeTab === "DISCOVERY" && <JobDiscovery refreshKey={refreshKey} />}
+      {activeTab === "DISCOVERY" && <JobDiscovery refreshKey={refreshKey} initialSourcesOpen={sourcesDeepLink} />}
 
       {activeTab === "WELLFOUND" && (
         <div className="flex-1 overflow-y-auto p-8 max-w-7xl mx-auto w-full">
@@ -111,12 +125,6 @@ export default function Dashboard() {
       {activeTab === "BRIEFING" && (
         <div className="flex-1 overflow-y-auto p-8 max-w-7xl mx-auto w-full">
           <DailyBriefing />
-        </div>
-      )}
-
-      {activeTab === "SOURCES" && (
-        <div className="flex-1 overflow-y-auto p-8 max-w-7xl mx-auto w-full">
-          <SourcesManager onSyncFinished={refreshJobs} />
         </div>
       )}
 

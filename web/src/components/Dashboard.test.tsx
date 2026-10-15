@@ -30,7 +30,16 @@ describe("Dashboard", () => {
   it("switches tabs and mirrors the tab in the URL", async () => {
     global.fetch = vi.fn(() => new Promise(() => {})) as unknown as typeof fetch;
     render(<Dashboard />);
-    fireEvent.click(screen.getByRole("button", { name: "🏢 Job Sources" }));
-    expect(window.location.search).toBe("?tab=SOURCES");
+    fireEvent.click(screen.getByRole("button", { name: "👤 Profile & Resume" }));
+    expect(window.location.search).toBe("?tab=PROFILE");
+  });
+
+  it("has no separate Job Sources tab; old ?tab=SOURCES links open the sources drawer in Discovery", async () => {
+    window.history.replaceState(null, "", "/?tab=SOURCES");
+    global.fetch = vi.fn(() => new Promise(() => {})) as unknown as typeof fetch;
+    render(<Dashboard />);
+    expect(screen.queryByRole("button", { name: /Job Sources|Target Companies/ })).toBeNull();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage job sources" })).toBeDefined());
+    expect(window.location.search).toBe("?tab=DISCOVERY");
   });
 });

@@ -7,13 +7,21 @@ import JobCard from "./discovery/JobCard";
 import JobDetail from "./discovery/JobDetail";
 import SearchElsewhere from "./discovery/SearchElsewhere";
 import AddJobModal from "./discovery/AddJobModal";
+import SourcesDrawer from "./discovery/SourcesDrawer";
 import { DEFAULT_FILTERS, Facets, Filters, Job, JobsPage, Profile, filtersToQuery } from "./discovery/types";
 
 const PAGE_SIZE = 25;
 
 type SyncResponse = { message?: string; summary?: { totalNew?: number; totalUpdated?: number } };
 
-export default function JobDiscovery({ refreshKey = 0 }: { refreshKey?: number }) {
+export default function JobDiscovery({
+  refreshKey = 0,
+  initialSourcesOpen = false,
+}: {
+  refreshKey?: number;
+  /** Opens the Manage sources drawer (used by old `?tab=SOURCES` links). */
+  initialSourcesOpen?: boolean;
+}) {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
@@ -30,6 +38,17 @@ export default function JobDiscovery({ refreshKey = 0 }: { refreshKey?: number }
   const [message, setMessage] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const requestId = useRef(0);
+  const [showSources, setShowSources] = useState(initialSourcesOpen);
+  const [prevInitialSources, setPrevInitialSources] = useState(initialSourcesOpen);
+  if (initialSourcesOpen !== prevInitialSources) {
+    setPrevInitialSources(initialSourcesOpen);
+    if (initialSourcesOpen) setShowSources(true);
+  }
+  const closeSources = useCallback(() => {
+    setShowSources(false);
+    setReload((r) => r + 1);
+  }, []);
+  const sourcesSynced = useCallback(() => setReload((r) => r + 1), []);
 
   const loadFacets = useCallback(() => {
     api<Facets>("/api/jobs/facets")
@@ -130,6 +149,12 @@ export default function JobDiscovery({ refreshKey = 0 }: { refreshKey?: number }
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-bold tracking-tight text-gray-900">Job Feed</h1>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowSources(true)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-white hover:bg-gray-50 text-gray-700 border border-gray-300"
+              >
+                Manage sources
+              </button>
               <button
                 onClick={() => setShowAdd(true)}
                 className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200"
@@ -235,6 +260,8 @@ export default function JobDiscovery({ refreshKey = 0 }: { refreshKey?: number }
           <SearchElsewhere />
         )}
       </div>
+
+      {showSources && <SourcesDrawer onClose={closeSources} onSyncFinished={sourcesSynced} />}
 
       {showAdd && (
         <AddJobModal

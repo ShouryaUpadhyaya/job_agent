@@ -167,4 +167,20 @@ describe("helpers", () => {
     expect(text).toContain("Example University");
     expect(text).not.toContain("VIT");
   });
+  it("opens the Manage sources drawer with the sources manager and closes it", async () => {
+    mockApi((url) => (url.endsWith("/api/sources") ? reply({ sources: [{ id: "s1", sourceType: "greenhouse", name: "Cloudflare", boardToken: "cloudflare", enabled: true, jobCount: 3, supported: true }] }) : undefined));
+    render(<JobDiscovery />);
+    await waitFor(() => expect(screen.getByTestId("job-item-1")).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Manage sources" }));
+    const dialog = screen.getByRole("dialog", { name: "Manage job sources" });
+    await waitFor(() => expect(within(dialog).getByText("Cloudflare")).toBeDefined());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Manage job sources" })).toBeNull();
+  });
+
+  it("opens the sources drawer immediately when asked by a deep link", async () => {
+    mockApi();
+    render(<JobDiscovery initialSourcesOpen />);
+    expect(screen.getByRole("dialog", { name: "Manage job sources" })).toBeDefined();
+  });
 });
