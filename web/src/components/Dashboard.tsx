@@ -28,10 +28,40 @@ export type Job = {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
+const TABS = [
+  { id: "DISCOVERY", label: "🎯 Job Discovery" },
+  { id: "WELLFOUND", label: "⚡ Wellfound AutoApply" },
+  { id: "PIPELINE", label: "📋 Application Pipeline" },
+  { id: "NETWORKING", label: "🤝 Networking CRM" },
+  { id: "GMAIL", label: "📬 Gmail Sync" },
+  { id: "BRIEFING", label: "📰 Daily Briefing" },
+  { id: "SOURCES", label: "🏢 Target Companies" },
+  { id: "PROFILE", label: "👤 Profile & Resume" },
+] as const;
+
+export type TabId = (typeof TABS)[number]["id"];
+
+/** Active tab mirrored in `?tab=` so OAuth redirects and links land on the right view. */
+function useTabParam(): [TabId, (tab: TabId) => void] {
+  const [tab, setTab] = useState<TabId>("DISCOVERY");
+
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("tab");
+    if (fromUrl && TABS.some((t) => t.id === fromUrl)) setTab(fromUrl as TabId);
+  }, []);
+
+  const select = (next: TabId) => {
+    setTab(next);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", next);
+    window.history.replaceState(null, "", url.toString());
+  };
+
+  return [tab, select];
+}
+
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<
-    "DISCOVERY" | "WELLFOUND" | "PIPELINE" | "NETWORKING" | "GMAIL" | "BRIEFING" | "SOURCES" | "PROFILE"
-  >("DISCOVERY");
+  const [activeTab, setActiveTab] = useTabParam();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
 
@@ -287,89 +317,19 @@ export default function Dashboard() {
         </div>
 
         <div className="flex space-x-1 overflow-x-auto">
-          <button
-            onClick={() => setActiveTab("DISCOVERY")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeTab === "DISCOVERY"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-300 hover:text-white hover:bg-slate-800"
-            }`}
-          >
-            🎯 Job Discovery
-          </button>
-          <button
-            onClick={() => setActiveTab("WELLFOUND")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center space-x-1.5 ${
-              activeTab === "WELLFOUND"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-300 hover:text-white hover:bg-slate-800"
-            }`}
-          >
-            <span>⚡ Wellfound AutoApply</span>
-            <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] rounded-full">
-              Bot
-            </span>
-          </button>
-          <button
-            onClick={() => setActiveTab("PIPELINE")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeTab === "PIPELINE"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-300 hover:text-white hover:bg-slate-800"
-            }`}
-          >
-            📋 Application Pipeline
-          </button>
-          <button
-            onClick={() => setActiveTab("NETWORKING")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeTab === "NETWORKING"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-300 hover:text-white hover:bg-slate-800"
-            }`}
-          >
-            🤝 Networking CRM
-          </button>
-          <button
-            onClick={() => setActiveTab("GMAIL")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeTab === "GMAIL"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-300 hover:text-white hover:bg-slate-800"
-            }`}
-          >
-            📬 Gmail Sync
-          </button>
-          <button
-            onClick={() => setActiveTab("BRIEFING")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeTab === "BRIEFING"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-300 hover:text-white hover:bg-slate-800"
-            }`}
-          >
-            📰 Daily Briefing
-          </button>
-          <button
-            onClick={() => setActiveTab("SOURCES")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeTab === "SOURCES"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-300 hover:text-white hover:bg-slate-800"
-            }`}
-          >
-            🏢 Target Companies
-          </button>
-          <button
-            onClick={() => setActiveTab("PROFILE")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-              activeTab === "PROFILE"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-300 hover:text-white hover:bg-slate-800"
-            }`}
-          >
-            👤 Profile & Resume
-          </button>
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeTab === tab.id
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-300 hover:text-white hover:bg-slate-800"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </nav>
 
