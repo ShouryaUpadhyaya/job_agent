@@ -4,6 +4,22 @@ This board tracks the priority, status, test verification, and architecture deci
 
 ---
 
+## Phase 3 — Profile, multiple resumes, system overview (DONE)
+
+| ID | Description | Component | Status | Tests | Notes |
+|---|---|---|---|---|---|
+| **P3-1** | Multiple resumes | `server/src/api/resumes.ts`, `server/src/resumes/service.ts` | **DONE** | `resumesApi.test.ts` | `GET/POST/PATCH/DELETE /api/resumes`, `POST /api/resumes/:id/default`, `GET /api/resumes/rescore-status`. Create from a PDF (`resume`/`file` multipart field) or pasted `content`. Skills come from the `matching/skills.ts` vocabulary and can be edited, including removing them. There is always exactly one default resume. You can't delete the last resume, and deleting the default promotes the oldest remaining one. Each resume shows "best for N active jobs", taken from `JobListing.bestResumeId`. `CandidateProfile.rawResume` mirrors the default resume. |
+| **P3-2** | Rescore after edits | `server/src/resumes/rescore.ts` | **DONE** | API tests | Profile and resume changes call `rescoreAllJobs()` and wait up to `RESCORE_WAIT_MS` (5 s). Larger databases finish in the background, and requests made during a run queue one more pass. |
+| **P3-3** | Profile API fixes | `server/src/api/profiles.ts` | **DONE** | `profiles.test.ts`, `profilesResumeApi.test.ts` | Saves are partial: only the fields sent are changed, so saving no longer wipes `rawResume`. `applicationAnswers` is shallow-merged, with `null` deleting a key, so `wellfoundRules` survives. `PATCH /api/profiles` is added. `GET` uses `ensureActiveProfile()` instead of the hard-coded profile. The legacy `upload-resume` now adds a Resume, fills only empty profile fields and stores versioned Documents. |
+| **P3-4** | Resume parser | `server/src/resumes/parser.ts` | **DONE** | `resumeParser.test.ts` | Skills are matched with word boundaries, so "Google" no longer counts as Go. Also parses: the name (including all-caps names), phone, GitHub/LinkedIn/X/portfolio links, and the education institution, degree, GPA and graduation year (the end of a range, e.g. "Aug. 2024 – May 2028" gives 2028). Experience and projects are parsed into structured entries. |
+| **P3-5** | System overview | `server/src/api/overview.ts`, `web/src/components/SystemOverview.tsx` | **DONE** | `overviewApi.test.ts`, `SystemOverview.test.tsx` | `GET /api/overview` returns: active jobs by source and freshness, internships, APPLY/REVIEW counts, and applications by stage. It also returns new applications this week and the response rate (applications with an interview, assessment, rejection or offer email ÷ applied). Then contacts by status and VIT alumni, the last sync and 24 h failures per source, Gmail status, the last Wellfound run and the resume count. |
+| **P3-6** | Profile page | `web/src/components/ProfileManager.tsx`, `web/src/components/profile/` | **DONE** | `ProfileManager.test.tsx` | The page shows the overview first, then editable sections: contact, links, preferences, skills, education, experience/projects and application answers (shared keys with the Wellfound config). The resumes manager comes last: upload or paste, edit, set default, and delete with inline confirmation. |
+| **P3-7** | Target Companies tab removed | `web/src/components/Dashboard.tsx`, `web/src/components/discovery/SourcesDrawer.tsx` | **DONE** | `Dashboard.test.tsx`, `JobDiscovery.test.tsx` | "Target Companies" / "Job Sources" was just a label on the sources manager. Source management is now the **Manage sources** drawer in Job Discovery. Old `?tab=SOURCES` links (and `?sources=1`) open Discovery with that drawer open. |
+| **P3-8** | Copilot grounding | `server/src/api/copilot.ts` | **DONE** | `copilot.test.ts` | Copilot uses the active profile (`ensureActiveProfile`). Cover letters and answers are grounded in the job's best resume, falling back to the default resume. |
+| **P3-9** | Legacy resume migration | `server/src/scripts/migrateResumes.ts` | **DONE** | `migrateResumes.test.ts` | `npx tsx src/scripts/migrateResumes.ts` does a dry run. `--apply` creates a default "General" resume from `rawResume`, or else from the latest RESUME document. |
+
+---
+
 ## Sprint 4 — LinkedIn Referral CRM, Gmail OAuth Engine, Wellfound/LinkedIn Ingestion & 8:00 PM IST Daily Briefing (VERIFIED & COMPLETED)
 
 | ID | Description | Component | Status | Tests | Verification Summary |
@@ -17,7 +33,7 @@ This board tracks the priority, status, test verification, and architecture deci
 | **S4-7** | Networking CRM Cockpit UI | `web/src/components/NetworkingCrm.tsx` | **DONE** | 3 component tests | Contacts table with stage badges, VIT alumni indicators, Auto-Discover Target Leads modal, copyable connection note modal (<300 chars), and referral follow-up generator. |
 | **S4-8** | Gmail Mailbox Sync & Simulator UI | `web/src/components/GmailSync.tsx` | **DONE** | 1 component test | Google account connection card, "Sync Inbox Now" action, interactive live email simulator for interviewer invitations and connection acceptances, classified event stream. |
 | **S4-9** | Daily Briefing Executive Cockpit UI | `web/src/components/DailyBriefing.tsx` | **DONE** | 1 component test | Executive overview cards, urgent "Needs Attention" alert highlight, formatted Markdown briefing, "Refresh Briefing Now" trigger, and historical briefing selector. |
-| **S4-10** | Unified 7-Tab Dashboard & Job Import Modal | `web/src/components/Dashboard.tsx` | **DONE** | 6 component tests | Top navigation expanded to 7 tabs (🎯 Job Discovery, 📋 Pipeline, 🤝 Networking CRM, 📬 Gmail Sync, 📰 Daily Briefing, 🏢 Target Companies, 👤 Profile & Resume) + inline "+ Import Job" modal for Wellfound and LinkedIn URLs. |
+| **S4-10** | Unified 7-Tab Dashboard & Job Import Modal | `web/src/components/Dashboard.tsx` | **DONE** | 6 component tests | Top navigation expanded to 7 tabs (🎯 Job Discovery, 📋 Pipeline, 🤝 Networking CRM, 📬 Gmail Sync, 📰 Daily Briefing, 🏢 Target Companies, 👤 Profile & Resume; the Target Companies tab was later removed — see P3-7) + inline "+ Import Job" modal for Wellfound and LinkedIn URLs. |
 
 ---
 
@@ -31,7 +47,7 @@ This board tracks the priority, status, test verification, and architecture deci
 | **S3-4** | ATS Resume & Cover Letter Tailoring Engine | `server/src/resumes/tailor.ts` | **DONE** | 2 unit + API tests | Direct skill matches vs missing keywords, grounded impact bullets, personalized cover letter generation saved to versioned `Document`. |
 | **S3-5** | Applications Pipeline & Stage Tracking | `server/src/api/applications.ts` | **DONE** | 3 integration tests | Stages (`BOOKMARKED`, `APPLYING`, `APPLIED`, `INTERVIEWING`, `OFFERED`, `REJECTED`), audit logs, notes, and strict human approval gate. |
 | **S3-6** | Applications Pipeline UI | `web/src/components/ApplicationsPipeline.tsx` | **DONE** | 3 component tests | Full kanban stage cards, stage selector dropdown, notes editor modal, remove action. |
-| **S3-7** | Target Companies & Sources UI | `web/src/components/SourcesManager.tsx` | **DONE** | 3 component tests | Dynamic table of employer boards across Greenhouse, Ashby, Lever, Arbeitnow, +Add Board form, enable/disable toggle, per-source sync. |
+| **S3-7** | Sources UI (formerly "Target Companies"; now the Discovery drawer, see P3-7) | `web/src/components/SourcesManager.tsx` | **DONE** | 3 component tests | Dynamic table of employer boards across Greenhouse, Ashby, Lever, Arbeitnow, +Add Board form, enable/disable toggle, per-source sync. |
 | **S3-8** | Candidate Profile & Resume UI | `web/src/components/ProfileManager.tsx` | **DONE** | 3 component tests | Profile editor, skill tags management, PDF resume drag-and-drop upload and raw text paste parser with instant job rescoring feedback. |
 | **S3-9** | Unified Multi-Tab Cockpit & Tailoring Preview | `web/src/components/Dashboard.tsx` | **DONE** | 6 component tests | Top navigation bar with 4 tabs (Job Discovery, Applications Pipeline, Target Companies, Profile & Resume) + inline "Tailor Resume" ATS preview. |
 
