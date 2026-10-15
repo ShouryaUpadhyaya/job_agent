@@ -163,6 +163,18 @@ describe('matchJob', () => {
     expect(usRemote.reasons).toContain('Remote (region-restricted)');
   });
 
+  it('does not boost non-engineering internships', () => {
+    const r = matchJob(intern, job({ title: 'Marketing Intern', description: 'Run campaigns and social media for our brand across India.' }), { now: NOW });
+    expect(r.eligibilityConcerns).toContain('Not an engineering role.');
+    expect(r.classification).toBe('SKIP');
+  });
+
+  it('treats remote roles limited to another country as region-restricted', () => {
+    expect(matchJob(intern, job({ location: 'Remote (Ireland)' }), { now: NOW }).reasons).toContain('Remote (region-restricted)');
+    expect(matchJob(intern, job({ location: 'Remote (Worldwide)' }), { now: NOW }).reasons).toContain('Remote-friendly');
+    expect(matchJob(intern, job({ location: 'Remote / Hybrid' }), { now: NOW }).reasons).toContain('Remote-friendly');
+  });
+
   it('decays with age', () => {
     const fresh = matchJob(intern, job({ publishedAt: new Date('2026-10-14T00:00:00Z') }), { now: NOW });
     const old = matchJob(intern, job({ publishedAt: new Date('2026-07-01T00:00:00Z') }), { now: NOW });

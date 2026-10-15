@@ -64,6 +64,8 @@ const ROLE_CATEGORIES: [string, RegExp][] = [
   ['software', /\b(software|sde|swe|developer|programmer|engineer)\b/i],
 ];
 const ENGINEERING_TITLE_RE = /\b(engineer(ing)?|developer|sde|swe|programmer|software|devops|sre|data scientist|ml|technolog(y|ist))\b/i;
+/** Titles that are technical even without "engineer" (used to keep non-tech internships out). */
+const TECH_TITLE_RE = /\b(engineer(ing)?|developer|dev|sde|swe|programmer|software|devops|sre|data|ml|ai|machine learning|analytics|backend|back[- ]end|frontend|front[- ]end|full[- ]?stack|web|mobile|android|ios|cloud|platform|infrastructure|security|qa|test|automation|technical|technology|it|research|scientist|computer|cyber|blockchain|game)\b/i;
 
 const INDIA_PLACES = [
   'india', 'bengaluru', 'bangalore', 'hyderabad', 'pune', 'mumbai', 'navi mumbai', 'chennai', 'delhi', 'new delhi',
@@ -162,7 +164,13 @@ function locationAssessment(
   }
   if (isRemote) {
     if (!remoteOk && !preferred.some((p) => /remote/i.test(p))) return { points: 0 };
-    if (REGION_RESTRICTED_REMOTE_RE.test(loc)) {
+    const qualifier = (loc.match(/\(([^)]+)\)/)?.[1] || loc)
+      .replace(/\b(remote|anywhere|work from home|wfh|hybrid|on-?site|first|friendly|optional|only|role|unspecified|distributed|time ?zones?|tz)\b/gi, '')
+      .replace(/[^a-z ]/gi, ' ')
+      .trim();
+    const openToIndia = !qualifier || /\b(india|apac|asia|worldwide|anywhere|global|international)\b/i.test(qualifier) ||
+      (prefersIndia && INDIA_PLACES.some((place) => wordIn(qualifier, place)));
+    if (REGION_RESTRICTED_REMOTE_RE.test(loc) || (!openToIndia && /[a-z]{3,}/i.test(qualifier))) {
       return { points: 4, reason: 'Remote (region-restricted)', concern: `Remote role limited to: ${loc}` };
     }
     return { points: 12, reason: 'Remote-friendly' };
@@ -245,6 +253,14 @@ export function matchJob(profile: MatchProfile, job: MatchJobInput, options: Mat
     } else if (ENGINEERING_TITLE_RE.test(title)) {
       rolePoints += 6;
     }
+  }
+
+  // Non-technical roles ("Marketing Intern", "Video Editor Intern") are not what an engineering
+  // profile wants, whatever their level.
+  const techTitle = TECH_TITLE_RE.test(title) || titleHits.length > 0;
+  if (!techTitle) {
+    rolePoints = Math.min(rolePoints, 5) - 15;
+    eligibilityConcerns.push('Not an engineering role.');
   }
 
   // 3. Seniority / experience.
