@@ -176,7 +176,9 @@ function locationAssessment(
     return { points: 12, reason: 'Remote-friendly' };
   }
   if (!loc || /unspecified|multiple|various/i.test(loc)) return { points: 0 };
-  return { points: -10, concern: `Location outside your preferences: ${loc}` };
+  // An on-site role in another country is effectively out of reach for a student who wants
+  // India/remote (visa, relocation), so it must not outrank nearby roles on skills alone.
+  return { points: prefersIndia ? -30 : -10, concern: `Location outside your preferences: ${loc}` };
 }
 
 function freshness(job: MatchJobInput, now: Date): { points: number; reason?: string } {

@@ -163,6 +163,13 @@ describe('matchJob', () => {
     expect(usRemote.reasons).toContain('Remote (region-restricted)');
   });
 
+  it('ranks on-site roles abroad well below the same role in India for an India-preferring profile', () => {
+    const india = matchJob(intern, job({ location: 'Bengaluru, India' }), { now: NOW });
+    const paris = matchJob(intern, job({ location: 'Paris, France' }), { now: NOW });
+    expect(india.score - paris.score).toBeGreaterThanOrEqual(40);
+    expect(paris.classification).not.toBe('APPLY');
+  });
+
   it('does not boost non-engineering internships', () => {
     const r = matchJob(intern, job({ title: 'Marketing Intern', description: 'Run campaigns and social media for our brand across India.' }), { now: NOW });
     expect(r.eligibilityConcerns).toContain('Not an engineering role.');
