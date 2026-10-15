@@ -1,5 +1,6 @@
 import { classifyJobEmail, ComprehensiveClassification, ClassificationResult } from './classifier';
 
+/** Legacy three-way wrapper kept for older callers/tests; prefer classifyJobEmail. */
 export type EmailClassification = "INTERVIEW" | "REJECTION" | "UNKNOWN";
 
 export function classifyEmail(content: string): EmailClassification {
