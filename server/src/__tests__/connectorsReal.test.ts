@@ -35,12 +35,13 @@ describe('Production Job Connectors (Unit & Fixtures)', () => {
 
       expect(jobs).toHaveLength(1);
       expect(jobs[0].externalId).toBe('123456');
-      expect(jobs[0].source).toBe('Greenhouse');
+      expect(jobs[0].source).toBe('greenhouse');
       expect(jobs[0].title).toBe('Systems Engineer');
       expect(jobs[0].company).toBe('Cloudflare');
       expect(jobs[0].location).toBe('Remote, India');
-      // Strips gh_jid tracking param
-      expect(jobs[0].url).toBe('https://boards.greenhouse.io/cloudflare/jobs/123456');
+      // gh_jid is the job id on company-hosted boards, so it must be kept
+      expect(jobs[0].url).toBe('https://boards.greenhouse.io/cloudflare/jobs/123456?gh_jid=123456');
+      expect(jobs[0].description).not.toContain('<p>');
       expect(jobs[0].description).toContain('Linux');
     });
 
@@ -96,7 +97,7 @@ describe('Production Job Connectors (Unit & Fixtures)', () => {
 
       expect(jobs).toHaveLength(1);
       expect(jobs[0].externalId).toBe('ashby-uuid-99');
-      expect(jobs[0].source).toBe('Ashby');
+      expect(jobs[0].source).toBe('ashby');
       expect(jobs[0].company).toBe('Linear');
       expect(jobs[0].url).toBe('https://jobs.ashbyhq.com/linear/ashby-uuid-99');
       expect(jobs[0].description).toBe('Build next-gen project management with React and TypeScript.');
@@ -132,7 +133,7 @@ describe('Production Job Connectors (Unit & Fixtures)', () => {
 
       expect(jobs).toHaveLength(1);
       expect(jobs[0].externalId).toBe('backend-engineer-node-123');
-      expect(jobs[0].source).toBe('Arbeitnow');
+      expect(jobs[0].source).toBe('arbeitnow');
       expect(jobs[0].company).toBe('Fintech AG');
       expect(jobs[0].tags).toContain('Node.js');
     });

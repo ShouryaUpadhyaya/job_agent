@@ -1,5 +1,5 @@
-import { JobConnector, RawJobPayload } from './types';
-import { fetchWithRetry, cleanHtml, canonicalizeUrl } from './utils';
+import { JobConnector, RawJobPayload, SOURCE_IDS } from './types';
+import { fetchWithRetry, cleanHtml, canonicalizeUrl, DEFAULT_HEADERS } from './utils';
 
 interface LeverPosting {
   id: string;
@@ -9,6 +9,8 @@ interface LeverPosting {
   descriptionPlain?: string;
   description?: string;
   additional?: string;
+  lists?: { text?: string; content?: string }[];
+  workplaceType?: string;
   categories?: {
     commitment?: string;
     department?: string;
@@ -19,9 +21,11 @@ interface LeverPosting {
   createdAt?: number;
 }
 
+/** Public Lever postings API: https://github.com/lever/postings-api */
 export class LeverConnector implements JobConnector {
-  public source = 'lever';
+  public readonly source = SOURCE_IDS.lever;
   public readonly name: string;
+  public readonly feedKey: string;
   private company: string;
   private companyDisplayName: string;
 
@@ -29,20 +33,19 @@ export class LeverConnector implements JobConnector {
     this.company = company;
     this.companyDisplayName = companyDisplayName || company.charAt(0).toUpperCase() + company.slice(1);
     this.name = this.companyDisplayName;
+    this.feedKey = `lever:${company}`;
   }
 
   getEndpoint(): string {
     return `https://api.lever.co/v0/postings/${encodeURIComponent(this.company)}?mode=json`;
   }
 
+  static postingUrl(company: string, id: string): string {
+    return `https://api.lever.co/v0/postings/${encodeURIComponent(company)}/${encodeURIComponent(id)}?mode=json`;
+  }
+
   async fetchJobs(): Promise<RawJobPayload[]> {
-    const url = this.getEndpoint();
-    const response = await fetchWithRetry(url, {
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'JobAgent/1.0',
-      },
-    });
+    const response = await fetchWithRetry(this.getEndpoint(), { headers: DEFAULT_HEADERS });
 
     if (!response.ok) {
       throw new Error(`Lever API error for ${this.company} (${response.status}): ${response.statusText}`);
@@ -59,24 +62,30 @@ export class LeverConnector implements JobConnector {
       if (!location && Array.isArray(post.categories?.allLocations) && post.categories.allLocations.length > 0) {
         location = post.categories.allLocations.join(', ');
       }
+      if (post.workplaceType === 'remote' && !/remote/i.test(location)) {
+        location = location ? `${location} (Remote)` : 'Remote';
+      }
       if (!location) {
-        location = 'Remote / Unspecified';
+        location = 'Unspecified';
       }
 
-      const rawDescription = post.description || post.descriptionPlain || '';
-      const additional = post.additional ? `\n\n${post.additional}` : '';
-      const fullDescription = cleanHtml(rawDescription + additional);
+      const lists = (post.lists || []).map((l) => `${l.text || ''}\n${l.content || ''}`).join('\n');
+      const rawDescription = [post.description || post.descriptionPlain || '', lists, post.additional || '']
+        .filter(Boolean)
+        .join('\n\n');
+      const commitment = post.categories?.commitment || '';
 
       return {
         externalId: post.id,
-        source: 'lever',
+        source: this.source,
         title: (post.text || 'Untitled Role').trim(),
         company: this.companyDisplayName,
         url: canonicalizeUrl(post.hostedUrl || post.applyUrl || `https://jobs.lever.co/${this.company}/${post.id}`),
-        description: fullDescription || 'No description provided.',
+        description: cleanHtml(rawDescription) || 'No description provided.',
         location,
-        publishedAt: post.createdAt ? new Date(post.createdAt) : new Date(),
-        tags: [this.companyDisplayName, 'Lever'],
+        publishedAt: post.createdAt ? new Date(post.createdAt) : undefined,
+        employmentType: /intern/i.test(commitment) ? 'INTERNSHIP' : commitment ? commitment.toUpperCase() : undefined,
+        tags: [this.companyDisplayName, 'Lever', ...(commitment ? [commitment] : [])],
       };
     });
   }

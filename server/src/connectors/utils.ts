@@ -50,34 +50,49 @@ export async function fetchWithRetry(url: string, options: FetchOptions = {}): P
   throw lastError || new Error(`Failed to fetch ${url} after ${maxRetries} retries`);
 }
 
-export function cleanHtml(html: string = ''): string {
-  if (!html) return '';
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<\/p>|<\/div>|<br\s*\/?>/gi, '\n')
-    .replace(/<li[^>]*>/gi, '• ')
-    .replace(/<\/li>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
+function decodeEntities(s: string): string {
+  return s
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&amp;/g, '&');
+}
+
+export function cleanHtml(html: string = ''): string {
+  if (!html) return '';
+  // Some APIs (Greenhouse) return entity-escaped HTML; unescape it before stripping tags.
+  let input = html;
+  if (!/<[a-z!/]/i.test(input) && /&lt;\/?[a-z]/i.test(input)) {
+    input = decodeEntities(input);
+  }
+  const stripped = input
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<\/p>|<\/div>|<br\s*\/?>|<\/h[1-6]>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<[^>]+>/g, '');
+  return decodeEntities(stripped)
+    .replace(/[ \t]+\n/g, '\n')
     .replace(/\n\s*\n\s*\n/g, '\n\n')
     .trim();
 }
 
+// Query params that only track the click. `gh_jid` is NOT here: on company-hosted Greenhouse
+// boards (e.g. https://example.com/careers?gh_jid=123) it is the job id itself.
+const TRACKING_PARAMS = [
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'utm_id',
+  'gh_src', 'ref', 'source', 'fbclid', 'gclid', 'mc_cid', 'mc_eid', 'lever-source', 'lever-origin',
+];
+
 export function canonicalizeUrl(rawUrl: string): string {
   try {
     const parsed = new URL(rawUrl);
-    // Strip common tracking and referrer params
-    const trackingParams = [
-      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-      'gh_jid', 'gh_src', 'ref', 'source', 'fbclid', 'gclid'
-    ];
-    for (const param of trackingParams) {
+    for (const param of TRACKING_PARAMS) {
       parsed.searchParams.delete(param);
     }
     return parsed.toString();
@@ -85,3 +100,49 @@ export function canonicalizeUrl(rawUrl: string): string {
     return rawUrl;
   }
 }
+
+/**
+ * Hosts we never fetch automatically (their terms forbid automated access). Their jobs only
+ * enter through alert emails or details the user pastes.
+ */
+const RESTRICTED_HOSTS = ['linkedin.com', 'lnkd.in', 'naukri.com'];
+
+export function isRestrictedHost(rawUrl: string): boolean {
+  try {
+    const host = new URL(rawUrl).hostname.toLowerCase();
+    return RESTRICTED_HOSTS.some((h) => host === h || host.endsWith('.' + h));
+  } catch {
+    return false;
+  }
+}
+
+/** Deterministic short hash, for ids of feed items that carry no id of their own. */
+export function stableHash(input: string): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0;
+  for (let i = 0; i < input.length; i++) {
+    const c = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = (Math.imul(h2, 31) + c) >>> 0;
+  }
+  return h1.toString(36) + h2.toString(36);
+}
+
+/** Runs `fn` over `items` with at most `limit` in flight. */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+export const DEFAULT_HEADERS = {
+  Accept: 'application/json',
+  'User-Agent': 'JobAgent/1.0',
+};
