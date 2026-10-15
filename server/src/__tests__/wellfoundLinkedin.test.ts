@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import request from 'supertest';
 import { app } from '../app';
 import { prisma } from '../db';
@@ -115,7 +115,9 @@ describe('Wellfound & LinkedIn Connectors and Workflows', () => {
       expect(res.status).toBe(201);
       expect(res.body.job.source).toBe('wellfound');
       expect(res.body.job.company).toBe('Superfluid AI');
-      expect(res.body.job.score).toBeGreaterThanOrEqual(60);
+      // A founding (non-intern) role for an intern-targeting profile lands in REVIEW, not APPLY.
+      expect(res.body.job.score).toBeGreaterThanOrEqual(35);
+      expect(res.body.job.status).toBe('REVIEW');
       expect(res.body.job.matchedSkills).toContain('TypeScript');
     });
 
@@ -143,12 +145,39 @@ describe('Wellfound & LinkedIn Connectors and Workflows', () => {
       expect(checklistRes.body.checklist.steps.length).toBe(4);
     });
 
-    it('POST /api/jobs/scrape/linkedin validates URL parameter', async () => {
+    it('POST /api/jobs/scrape/linkedin is gone (no automated LinkedIn access)', async () => {
       const res = await request(app)
         .post('/api/jobs/scrape/linkedin')
-        .send({});
+        .send({ url: 'https://www.linkedin.com/jobs/view/4011223344/' });
+      expect(res.status).toBe(410);
+    });
+
+    it('POST /api/jobs/import/linkedin requires pasted details and never fetches LinkedIn', async () => {
+      const fetchSpy = vi.spyOn(global, 'fetch');
+      const res = await request(app)
+        .post('/api/jobs/import/linkedin')
+        .send({ url: 'https://www.linkedin.com/jobs/view/4011223344/' });
       expect(res.status).toBe(400);
-      expect(res.body.error).toContain('url is required');
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it('re-importing a tracked job never moves its stage backwards', async () => {
+      const body = {
+        url: 'https://www.linkedin.com/jobs/view/4099887766/',
+        title: 'Backend Engineer Intern',
+        company: 'Examplesoft',
+        description: 'Internship building APIs in TypeScript and Node.js.',
+        trackInPipeline: true,
+        stage: 'APPLIED',
+      };
+      const first = await request(app).post('/api/jobs/import/linkedin').send(body);
+      expect(first.body.application.stage).toBe('APPLIED');
+      const again = await request(app).post('/api/jobs/import/linkedin').send({ ...body, stage: 'BOOKMARKED' });
+      expect(again.status).toBe(200);
+      expect(again.body.application.stage).toBe('APPLIED');
+      const apps = await prisma.jobApplication.findMany({ where: { jobListingId: first.body.job.id } });
+      expect(apps).toHaveLength(1);
     });
   });
 });

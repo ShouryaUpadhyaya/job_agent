@@ -1,58 +1,97 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db';
-import { syncService, SyncService } from '../jobs/syncService';
-import { processAndUpsertJob } from '../jobs/normalization';
-import { RawJobPayload } from '../connectors/types';
+import { syncService, connectorLabel } from '../jobs/syncService';
+import {
+  createConnector,
+  normalizeSourceType,
+  isSupportedSourceType,
+  validateSourceToken,
+  SUPPORTED_SOURCE_TYPES,
+  UNSUPPORTED_SOURCE_TYPES,
+} from '../connectors/registry';
+import { rescoreAllJobs } from '../matching/resumeScoring';
 
 const router = Router();
 
-// GET /api/sources - List all configured job sources
+// GET /api/sources/types - Source types the add-form can offer
+router.get('/types', (_req: Request, res: Response) => {
+  res.json({ types: SUPPORTED_SOURCE_TYPES, unsupported: UNSUPPORTED_SOURCE_TYPES });
+});
+
+// GET /api/sources - List configured sources with their latest sync run
 router.get('/', async (_req: Request, res: Response) => {
   try {
     await syncService.ensureDefaultSources();
-    const sources = await prisma.jobSourceConfig.findMany({
-      orderBy: { createdAt: 'asc' },
+    const sources = await prisma.jobSourceConfig.findMany({ orderBy: { createdAt: 'asc' } });
+
+    const labels = new Map<string, string>();
+    for (const s of sources) {
+      const connector = createConnector(s);
+      if (connector) labels.set(s.id, connectorLabel(connector));
+    }
+    const runs = labels.size
+      ? await prisma.syncRun.findMany({
+          where: { source: { in: [...new Set(labels.values())] } },
+          orderBy: { startedAt: 'desc' },
+          take: 500,
+        })
+      : [];
+    const latest = new Map<string, (typeof runs)[number]>();
+    for (const run of runs) if (!latest.has(run.source)) latest.set(run.source, run);
+
+    res.json({
+      sources: sources.map((s) => {
+        const run = labels.has(s.id) ? latest.get(labels.get(s.id)!) : undefined;
+        return {
+          ...s,
+          supported: isSupportedSourceType(s.sourceType),
+          unsupportedReason: UNSUPPORTED_SOURCE_TYPES[s.sourceType.toLowerCase()] || null,
+          lastRun: run
+            ? {
+                status: run.status,
+                startedAt: run.startedAt,
+                completedAt: run.completedAt,
+                fetchedCount: run.fetchedCount,
+                newCount: run.newCount,
+                errorMessage: run.errorMessage,
+              }
+            : null,
+        };
+      }),
     });
-    res.json({ sources });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to list job sources' });
   }
 });
 
-// POST /api/sources - Add a new job source
+// POST /api/sources - Add (or rename/re-enable) a source
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { sourceType, boardToken, name, enabled } = req.body;
+    const { sourceType: rawType, boardToken, name, enabled } = req.body;
 
-    if (!sourceType || !name) {
+    if (!rawType || !name) {
       return res.status(400).json({ error: 'sourceType and name are required' });
     }
 
-    const validTypes = ['greenhouse', 'ashby', 'lever', 'arbeitnow', 'linkedin', 'wellfound'];
-    if (!validTypes.includes(sourceType.toLowerCase())) {
+    const sourceType = normalizeSourceType(String(rawType));
+    if (!isSupportedSourceType(sourceType)) {
+      const reason = UNSUPPORTED_SOURCE_TYPES[sourceType];
       return res.status(400).json({
-        error: `Invalid sourceType '${sourceType}'. Allowed types: ${validTypes.join(', ')}`,
+        error: reason
+          ? `Source type '${rawType}' is not supported: ${reason}`
+          : `Invalid sourceType '${rawType}'. Allowed types: ${SUPPORTED_SOURCE_TYPES.map((t) => t.type).join(', ')}`,
       });
     }
 
-    const token = (boardToken || '').trim().toLowerCase();
+    // Tokens keep their case: SmartRecruiters ids and feed URLs are case-sensitive.
+    const token = String(boardToken || '').trim() || (['remotive'].includes(sourceType) ? 'software-dev' : sourceType === 'remoteok' ? 'dev' : sourceType === 'arbeitnow' ? 'global' : '');
+    const invalid = validateSourceToken(sourceType, token);
+    if (invalid) return res.status(400).json({ error: invalid });
+
     const source = await prisma.jobSourceConfig.upsert({
-      where: {
-        sourceType_boardToken: {
-          sourceType: sourceType.toLowerCase(),
-          boardToken: token,
-        },
-      },
-      update: {
-        name,
-        enabled: enabled ?? true,
-      },
-      create: {
-        sourceType: sourceType.toLowerCase(),
-        boardToken: token,
-        name,
-        enabled: enabled ?? true,
-      },
+      where: { sourceType_boardToken: { sourceType, boardToken: token } },
+      update: { name, enabled: enabled ?? true },
+      create: { sourceType, boardToken: token, name, enabled: enabled ?? true },
     });
 
     await prisma.auditLog.create({
@@ -69,7 +108,7 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-// PATCH /api/sources/:id - Toggle enabled or update name
+// PATCH /api/sources/:id - Toggle enabled or rename
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -78,6 +117,11 @@ router.patch('/:id', async (req: Request, res: Response) => {
     const existing = await prisma.jobSourceConfig.findUnique({ where: { id } });
     if (!existing) {
       return res.status(404).json({ error: 'Job source not found' });
+    }
+    if (enabled && !isSupportedSourceType(existing.sourceType)) {
+      return res.status(400).json({
+        error: UNSUPPORTED_SOURCE_TYPES[existing.sourceType.toLowerCase()] || `Unsupported source type ${existing.sourceType}`,
+      });
     }
 
     const updated = await prisma.jobSourceConfig.update({
@@ -94,7 +138,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/sources/:id - Delete a job source
+// DELETE /api/sources/:id
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -110,7 +154,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/sources/:id/sync - Sync a single job source
+// POST /api/sources/:id/sync - Sync one source (records a SUCCESS or FAILED SyncRun)
 router.post('/:id/sync', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -120,51 +164,34 @@ router.post('/:id/sync', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Job source not found' });
     }
 
-    const connector = SyncService.createConnector(config);
+    const connector = createConnector(config);
     if (!connector) {
-      return res.status(400).json({ error: `Unsupported connector type: ${config.sourceType}` });
+      const reason = UNSUPPORTED_SOURCE_TYPES[config.sourceType.toLowerCase()];
+      return res.status(400).json({ error: reason || `Unsupported connector type: ${config.sourceType}` });
     }
 
-    const profile = await prisma.candidateProfile.findFirst({ orderBy: { id: 'asc' } });
     const startTime = Date.now();
-
-    const rawJobs = (await connector.fetchJobs()) as RawJobPayload[];
-    let newCount = 0;
-    let updatedCount = 0;
-
-    for (const rawJob of rawJobs) {
-      const { isNew } = await processAndUpsertJob(rawJob, profile);
-      if (isNew) newCount++;
-      else updatedCount++;
-    }
-
+    const ctx = await syncService.loadScoringContext();
+    const result = await syncService.syncConnector({ connector, config }, ctx);
     const durationMs = Date.now() - startTime;
-    const updatedSource = await prisma.jobSourceConfig.update({
-      where: { id: config.id },
-      data: {
-        lastSyncedAt: new Date(),
-        jobCount: newCount + updatedCount,
-      },
-    });
+    const updatedSource = await prisma.jobSourceConfig.findUnique({ where: { id } });
 
-    await prisma.syncRun.create({
-      data: {
-        source: config.name,
-        status: 'SUCCESS',
-        fetchedCount: rawJobs.length,
-        newCount,
-        updatedCount,
-        durationMs,
-        completedAt: new Date(),
-      },
-    });
+    if (result.status === 'FAILED') {
+      return res.status(502).json({ error: result.error || 'Sync failed', source: updatedSource, durationMs });
+    }
+    if (result.status === 'SUCCESS') {
+      rescoreAllJobs().catch(() => {});
+    }
 
     res.json({
       success: true,
+      skipped: result.status === 'SKIPPED',
+      message: result.error,
       source: updatedSource,
-      fetched: rawJobs.length,
-      new: newCount,
-      updated: updatedCount,
+      fetched: result.fetched,
+      new: result.new,
+      updated: result.updated,
+      closed: result.closed ?? 0,
       durationMs,
     });
   } catch (err: any) {
