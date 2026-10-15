@@ -4,8 +4,10 @@
  *   - LinkedIn connector fallbacks (externalId 'li-mock-*',   source 'linkedin')
  *   - seed.ts fictional jobs       (exact externalId + source pairs below)
  * Listings that have applications are left alone and printed so you can decide.
- * Also renames legacy capitalised source values ('Greenhouse' → 'greenhouse') when no
- * canonical row with the same externalId exists.
+ * Also renames legacy capitalised source values ('Greenhouse' → 'greenhouse'). When a
+ * canonical row with the same externalId already exists (an old server kept writing the
+ * capitalised name), the legacy duplicate is merged into it: its applications, contacts and
+ * email links move over, then the duplicate is deleted.
  *
  * Dry run (default):  npx tsx src/scripts/cleanupFakeJobs.ts
  * Apply:              npx tsx src/scripts/cleanupFakeJobs.ts --apply
@@ -53,7 +55,7 @@ async function main() {
 
   // Legacy source names → canonical ids.
   const renames: { id: string; from: string; to: string }[] = [];
-  const conflicts: string[] = [];
+  const merges: { legacyId: string; canonicalId: string }[] = [];
   for (const [canonical, legacyNames] of Object.entries(LEGACY_SOURCE_NAMES)) {
     const rows = await prisma.jobListing.findMany({
       where: { source: { in: legacyNames } },
@@ -62,18 +64,20 @@ async function main() {
     if (!rows.length) continue;
     const clashes = await prisma.jobListing.findMany({
       where: { source: canonical, externalId: { in: rows.map((r) => r.externalId) } },
-      select: { externalId: true },
+      select: { id: true, externalId: true },
     });
-    const clash = new Set(clashes.map((c) => c.externalId));
+    const twinByExternalId = new Map(clashes.map((c) => [c.externalId, c.id]));
     for (const r of rows) {
-      if (clash.has(r.externalId)) conflicts.push(`${r.source}/${r.externalId}`);
+      const twin = twinByExternalId.get(r.externalId);
+      if (twin) merges.push({ legacyId: r.id, canonicalId: twin });
       else renames.push({ id: r.id, from: r.source, to: canonical });
     }
   }
-  console.log(`\nLegacy source renames: ${renames.length}${conflicts.length ? ` (${conflicts.length} skipped: canonical row already exists)` : ''}`);
+  console.log(`\nLegacy source renames: ${renames.length}`);
+  console.log(`Legacy duplicates to merge into their canonical row: ${merges.length}`);
 
   if (!apply) {
-    console.log(`\nDry run: would delete ${deletable.length}, keep ${kept.length}, rename ${renames.length}.`);
+    console.log(`\nDry run: would delete ${deletable.length}, keep ${kept.length}, rename ${renames.length}, merge ${merges.length}.`);
     return;
   }
 
@@ -87,7 +91,14 @@ async function main() {
   for (const r of renames) {
     await prisma.jobListing.update({ where: { id: r.id }, data: { source: r.to } });
   }
-  console.log(`\nDeleted ${ids.length}, kept ${kept.length}, renamed ${renames.length}.`);
+  for (const m of merges) {
+    await prisma.$transaction([
+      prisma.jobApplication.updateMany({ where: { jobListingId: m.legacyId }, data: { jobListingId: m.canonicalId } }),
+      prisma.networkingContact.updateMany({ where: { targetJobId: m.legacyId }, data: { targetJobId: m.canonicalId } }),
+      prisma.jobListing.delete({ where: { id: m.legacyId } }),
+    ]);
+  }
+  console.log(`\nDeleted ${ids.length}, kept ${kept.length}, renamed ${renames.length}, merged ${merges.length}.`);
 }
 
 if (require.main === module) {
