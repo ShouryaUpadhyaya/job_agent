@@ -8,6 +8,8 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 import { prisma } from './db';
 import { jobsRouter } from './api/jobs';
 import { profilesRouter } from './api/profiles';
+import { resumesRouter } from './api/resumes';
+import { overviewRouter } from './api/overview';
 import { applicationsRouter } from './api/applications';
 import { copilotRouter } from './api/copilot';
 import { syncRouter } from './api/sync';
@@ -33,6 +35,8 @@ app.get('/health', async (req, res) => {
 
 app.use('/api', jobsRouter);
 app.use('/api', profilesRouter);
+app.use('/api', resumesRouter);
+app.use('/api', overviewRouter);
 app.use('/api', applicationsRouter);
 app.use('/api', copilotRouter);
 app.use('/api', syncRouter);

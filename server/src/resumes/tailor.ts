@@ -1,4 +1,5 @@
 import { CandidateProfile, JobListing } from '@prisma/client';
+import { textHasSkill } from '../matching/skills';
 import { candidateContext, generateText, hasPlaceholders, toPlainText, untrusted, UNTRUSTED_NOTICE } from '../lib/gemini';
 
 export interface TailoredResumeResult {
@@ -22,7 +23,7 @@ export function tailorResume(
   profile: CandidateProfile,
   job: JobListing
 ): TailoredResumeResult {
-  const jobText = `${job.title} ${job.description}`.toLowerCase();
+  const jobText = `${job.title} ${job.description}`;
   const candidateSkills = profile.skills || [];
 
   // 1. Classify matched vs missing
@@ -30,7 +31,7 @@ export function tailorResume(
   const unmatchedCandidateSkills: string[] = [];
 
   for (const skill of candidateSkills) {
-    if (jobText.includes(skill.toLowerCase())) {
+    if (textHasSkill(jobText, skill)) {
       matchedSkills.push(skill);
     } else {
       unmatchedCandidateSkills.push(skill);
@@ -44,7 +45,7 @@ export function tailorResume(
     'Distributed Systems', 'Microservices', 'RESTful APIs',
   ];
   const missingKeywords = potentialKeywords.filter(
-    (kw) => jobText.includes(kw.toLowerCase()) && !matchedSkills.some((s) => s.toLowerCase() === kw.toLowerCase())
+    (kw) => textHasSkill(jobText, kw) && !matchedSkills.some((s) => s.toLowerCase() === kw.toLowerCase())
   );
 
   // 2. Synthesize prioritized bullet points
