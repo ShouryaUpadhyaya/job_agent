@@ -1,8 +1,48 @@
-# Implementation Status & Sprint Board
+# Implementation Status
 
-This board tracks the priority, status, test verification, and architecture decisions for all milestones in the **Autonomous Multi-Agent Job Search Automation System**.
+What is implemented today, by area. The Phase 0–8 sections describe the improvement pass that
+removed fabricated data and ToS-violating code; the older Sprint/Milestone tables below are kept
+as history, and items they describe that no longer exist are marked **superseded**.
+
+Run `npm run test:server`, `npm run test:web`, `npm run build:server`, `npm run build:web` and
+`npm run lint -w web` for the current test and build status (counts change often, so they are not
+recorded here).
 
 ---
+
+## Phase 0 — Foundation (DONE)
+
+| ID | Description | Component | Notes |
+|---|---|---|---|
+| P0-1 | Isolated test database | `server/vitest.test-db.mts`, `server/vitest.global-setup.mts` | Derives `<db>_test` from `DATABASE_URL` (or `TEST_DATABASE_URL`), creates it and runs `prisma db push`; refuses database names without `test`. |
+| P0-2 | Schema additions | `server/prisma/schema.prisma` | Listing freshness/liveness/`userStatus`/`companyKey`, `Resume`, contact source/persona/URLs, application `source`/`lastEmailAt`, `EmailEvent.isDemo`, `WellfoundRun`. |
+| P0-3 | Shared helpers | `server/src/lib/*` | `companyKey`, `canTransition` (forward-only automated stage changes), IST time, active profile, single Gemini client (key in header, model fallback, timeouts). |
+| P0-4 | Web foundations | `web/src/lib/api.ts`, `Dashboard.tsx` | Typed fetch wrapper; tabs mirrored in `?tab=`. |
+
+## Phase 1 — Wellfound AutoApply (DONE)
+
+| ID | Description | Component | Notes |
+|---|---|---|---|
+| P1-1 | Repo-owned runner | `scripts/wellfound/runner.js`, `build-wellfound-paste.js` | Upstream submodule kept unmodified; `DRY_RUN` written explicitly on every build. |
+| P1-2 | Host agent + preflight | `scripts/wellfound/agent.js`, `preflight.js`, `server/src/wellfound/runService.ts` | Local or agent executor; token-protected agent; actionable preflight checklist. |
+| P1-3 | Runs, logs, diagnostics | `WellfoundRun`, `/api/wellfound/runs/*` | Append-only log per run, SSE stream with polling fallback, screenshots/HTML/JSON/trace per failure, HTML served as sandboxed attachment. |
+| P1-4 | Correct daily count and cap | `scripts/wellfound/lib.js` | ISO timestamps in the CSV, IST "today", `min(batch, cap − today)`. |
+| P1-5 | Live confirmation | `RunPanel.tsx`, `runService.ts` | Type `APPLY` in the UI; API requires `confirmLive: true`. |
+| P1-6 | Profile as source of truth | `server/src/wellfound/config.ts` | Runner config generated from the DB profile and rules; Gemini key never sent to the browser. |
+| P1-7 | Forward-only CSV import | `connectors/wellfoundAutoApplyService.ts` | Idempotent, uses `canTransition`, creates no contacts. |
+
+## Phase 2 — Job Discovery (DONE)
+
+| ID | Description | Component | Notes |
+|---|---|---|---|
+| P2-1 | Fake and ToS-violating code removed | `connectors/` | Wellfound mock jobs, LinkedIn guest scraper and server-side LinkedIn fetch deleted; `POST /jobs/scrape/linkedin` returns 410. LinkedIn/Wellfound imports take pasted details only. |
+| P2-2 | New connectors and curated defaults | `connectors/registry.ts` | SmartRecruiters, Workable, Remotive, Remote OK; RSS/JSON wired; defaults verified against live APIs (`docs/JOB_SOURCES.md`). |
+| P2-3 | Job-alert emails as a source | `discovery/jobAlerts.ts` | LinkedIn, Naukri, Internshala, Wellfound, Instahyre alerts → `source = email:<site>`. |
+| P2-4 | Search links and X feeds | `discovery/searchLinks.ts`, `xSources.json` | Prefilled searches the user opens; researched X accounts (`docs/X_SOURCES.md`). |
+| P2-5 | Matching rewrite | `matching/` | Word-boundary skills with aliases, profile-driven eligibility, seniority, freshness, score capped 0–100, per-resume best match. |
+| P2-6 | Liveness | `jobs/liveness.ts` | Closed after 2 missed feed syncs; stale listings rechecked via ATS APIs after each scheduled sync; LinkedIn/Naukri never fetched. |
+| P2-7 | Jobs API and Discovery UI | `api/jobs.ts`, `JobDiscovery.tsx`, `discovery/` | Filters, sorts, facets, pagination, save/dismiss, freshness badges, sources drawer. Email placeholder listings (`source = 'email'`) hidden. |
+| P2-8 | Cleanup script | `scripts/cleanupFakeJobs.ts` | Dry run unless `--apply`. |
 
 ## Phase 3 — Profile, multiple resumes, system overview (DONE)
 
@@ -20,18 +60,75 @@ This board tracks the priority, status, test verification, and architecture deci
 
 ---
 
+## Phase 4 — Application Pipeline (DONE)
+
+| ID | Description | Component | Notes |
+|---|---|---|---|
+| P4-1 | Stage fixes and duplicate guard | `api/applications.ts` | Re-import no longer resets stage; `POST` returns the existing application; `PATCH` validates the stage and syncs `status`; ARCHIVED stage. |
+| P4-2 | Server-side sorts and filters | `applications/service.ts` | Sorts: fit, match, alumni, recent, applied, company. Filters: stage, source, has alumni, search. |
+| P4-3 | Fit score | `applications/fit.ts` | Match 45, alumni 20, contacts 10, freshness 10, stage 10, email 5; breakdown in a tooltip. |
+| P4-4 | UI | `ApplicationsPipeline.tsx`, `pipeline/` | List/board toggle, optimistic edits, people strip with quick add, find-people links and referral drafts. |
+| P4-5 | Audit trail | `applications/audit.ts` | Manual, Gmail and Wellfound stage changes and creations recorded in one shape; read by the briefing. |
+
+## Phase 5 — Networking CRM (DONE)
+
+| ID | Description | Component | Notes |
+|---|---|---|---|
+| P5-1 | Fabricated contacts removed | `scripts/cleanupFakeContacts.ts`, `networking/` | Generators deleted; `POST /networking/generate-targets` now only returns search links. |
+| P5-2 | People discovery | `networking/peopleLinks.ts`, `github.ts` | LinkedIn/Google/X search links the user opens; public GitHub org members via the API. |
+| P5-3 | Quick add, dedupe, merge | `networking/contacts.ts`, `parse.ts` | Headline parsing, URL validation (`/in/`, `x.com/<handle>`). |
+| P5-4 | Priority score | `networking/priority.ts` | Alumni, persona, pipeline stage, recent postings, no-reply penalty; breakdown shown. |
+| P5-5 | Message drafts | `networking/messages.ts` | Connection note ≤ 300 chars, referral ask ≤ 120 words, follow-up, thank-you; Gemini or profile-based templates; rules from `docs/NETWORKING_PLAYBOOK.md`. |
+| P5-6 | UI | `NetworkingCrm.tsx`, `networking/` | Filters (company, persona, alumni, 11 statuses, source, follow-up due), sorts, debounced search, drafts with copy / mark sent. |
+
+## Phase 6 — Gmail (DONE)
+
+| ID | Description | Component | Notes |
+|---|---|---|---|
+| P6-1 | OAuth and tokens | `email/service.ts`, `oauthState.ts`, `config.ts` | `GMAIL_*` and legacy `GOOGLE_*` names, single-use `state`, refreshed tokens persisted, refresh token kept on re-consent, revoke on disconnect, `EXPIRED` status surfaced. |
+| P6-2 | Incremental, idempotent sync | `email/service.ts`, `query.ts`, `mime.ts` | Curated query, pagination, oldest first, skip stored messages before side effects, body decoding; one sync at a time. |
+| P6-3 | Classifier | `email/classifier.ts`, `refine.ts` | 12 classes, ATS-aware company extraction, job-alert-first rules, deadlines, importance; optional Gemini for low confidence. |
+| P6-4 | Effects | `email/effects.ts` | Forward-only stage changes at confidence ≥ 0.8; confirmations create/advance applications; LinkedIn accepts update contacts; recruiter replies become contacts; alerts → Discovery. |
+| P6-5 | Summary and UI | `email/summary.ts`, `GmailSync.tsx`, `gmail/` | Needs-action items, email-driven moves, counts, filters for every class, connection health. |
+| P6-6 | Demo mode | `email/demo.ts`, `scripts/cleanupDemoEmails.ts` | Explicit, `isDemo`-flagged, excluded everywhere; never inserted on sync failure. |
+| P6-7 | Scheduled sync | `scheduler/cron.ts` | Runs each scheduler tick when connected; `GMAIL_AUTO_SYNC=false` disables it. |
+
+## Phase 7 — Daily Briefing (DONE)
+
+| ID | Description | Component | Notes |
+|---|---|---|---|
+| P7-1 | IST-day briefing with catch-up | `briefing/summary.ts`, `scheduler/cron.ts` | One row per IST day; generated at/after 20:00 IST, checked every 5 minutes and on start, independent of the job sync. |
+| P7-2 | Content | `briefing/build.ts`, `inShort.ts`, `render.ts` | In short, today's actions, people to message, new matches, pipeline movement, Wellfound runs, stale applications (14+ days), week-over-week stats. |
+| P7-3 | UI | `DailyBriefing.tsx`, `briefing/` | Section cards with deep links to tabs, live view, regenerate, IST-dated history. |
+
+## Phase 8 — Docs (DONE)
+
+README, CLAUDE.md, ARCHITECTURE.md, SECURITY.md and this file rewritten for the current code.
+
+## Known gaps
+
+- `ApplicationCopilot` ("Apply with copilot" in a job's detail view) is a local cover-letter
+  editor. Its "Approve and Submit" button only changes local UI state; it does not call the API
+  and nothing is submitted.
+- Gmail and Wellfound tokens/session are stored unencrypted (database row / Chrome profile
+  directory); see `SECURITY.md`.
+
+---
+
+## History (earlier sprints)
+
 ## Sprint 4 — LinkedIn Referral CRM, Gmail OAuth Engine, Wellfound/LinkedIn Ingestion & 8:00 PM IST Daily Briefing (VERIFIED & COMPLETED)
 
 | ID | Description | Component | Status | Tests | Verification Summary |
 |---|---|---|---|---|---|
 | **S4-1** | Gmail OAuth & Multi-Class Email Classifier | `server/src/email/` | **DONE** | 9 integration tests | Google OAuth 2.0 flow via `googleapis`, `ConnectedAccount` persistence, comprehensive 12-class classifier (`INTERVIEW_INVITATION`, `ASSESSMENT`, `REJECTION`, `OFFER`, `LINKEDIN_CONNECTION_ACCEPTED`, `APPLICATION_CONFIRMATION`, etc.) with sender/company/role heuristics. |
 | **S4-2** | LinkedIn Acceptance & Pipeline Auto-Correlator | `server/src/email/service.ts` | **DONE** | Verified in tests | Correlates interview emails to `JobApplication` (advancing stage to `INTERVIEWING`/`OFFERED`), detects LinkedIn connection acceptance emails, updates contact to `ACCEPTED`, and auto-generates draft referral follow-up. |
-| **S4-3** | Networking Referral CRM & Persona Discovery | `server/src/networking/crm.ts` | **DONE** | 7 unit + API tests | `NetworkingContact` & `NetworkingMessage` models, lifecycle stages (`RESEARCHED` → `REQUEST_SENT` → `ACCEPTED` → `REFERRAL_REQUESTED` → `REFERRED`), ranked persona research prioritizing VIT Vellore alumni (98% fit), software engineers, and campus recruiters. |
-| **S4-4** | Strict 300-Char Connection Note & Referral Generator | `server/src/networking/crm.ts` | **DONE** | Unit tests | Strict LinkedIn <300 character constraint validation, customized outreach angles for VIT alumni, recruiters, and engineering managers, personalized referral asks referencing Shourya's verified skills (VIT '28, backend/distributed systems). |
-| **S4-5** | Wellfound & LinkedIn Job Ingestion & Checklist | `server/src/connectors/` | **DONE** | 5 integration tests | `normalizeWellfoundJob` for startup ecosystem jobs, `normalizeLinkedInJob` with numeric ID extraction, pre-application checklist generator identifying Easy Apply vs Direct Apply, and browser handoff routes (`POST /api/jobs/import/wellfound`, `POST /api/jobs/import/linkedin`, `GET /api/jobs/:id/checklist`). |
+| **S4-3** | Networking Referral CRM & Persona Discovery | `server/src/networking/crm.ts` | **SUPERSEDED** (generated personas removed, Phase 5) | 7 unit + API tests | `NetworkingContact` & `NetworkingMessage` models, lifecycle stages (`RESEARCHED` → `REQUEST_SENT` → `ACCEPTED` → `REFERRAL_REQUESTED` → `REFERRED`), ranked persona research prioritizing VIT Vellore alumni (98% fit), software engineers, and campus recruiters. |
+| **S4-4** | Strict 300-Char Connection Note & Referral Generator | `server/src/networking/messages.ts` | **SUPERSEDED** (rewritten in Phase 5; no hard-coded profile text) | Unit tests | Strict LinkedIn <300 character constraint validation, customized outreach angles for VIT alumni, recruiters, and engineering managers, personalized referral asks referencing the candidate's skills. |
+| **S4-5** | Wellfound & LinkedIn Job Ingestion & Checklist | `server/src/connectors/` | **SUPERSEDED** (paste-only imports, Phase 2) | 5 integration tests | `normalizeWellfoundJob` for startup ecosystem jobs, `normalizeLinkedInJob` with numeric ID extraction, pre-application checklist generator identifying Easy Apply vs Direct Apply, and browser handoff routes (`POST /api/jobs/import/wellfound`, `POST /api/jobs/import/linkedin`, `GET /api/jobs/:id/checklist`). |
 | **S4-6** | Daily Job-Search Briefing & 8:00 PM IST Scheduler | `server/src/briefing/` & `cron.ts` | **DONE** | 3 integration tests | Daily executive digest aggregating urgent interviews, pending assessments, accepted connections, and top 3 recommended roles. Persisted in `DailyJobSearchSummary`. Scheduled at 8:00 PM IST (14:30 UTC). Endpoints: `/api/briefing/today`, `/api/briefing/generate`, `/api/briefing/history`. |
-| **S4-7** | Networking CRM Cockpit UI | `web/src/components/NetworkingCrm.tsx` | **DONE** | 3 component tests | Contacts table with stage badges, VIT alumni indicators, Auto-Discover Target Leads modal, copyable connection note modal (<300 chars), and referral follow-up generator. |
-| **S4-8** | Gmail Mailbox Sync & Simulator UI | `web/src/components/GmailSync.tsx` | **DONE** | 1 component test | Google account connection card, "Sync Inbox Now" action, interactive live email simulator for interviewer invitations and connection acceptances, classified event stream. |
+| **S4-7** | Networking CRM Cockpit UI | `web/src/components/NetworkingCrm.tsx` | **SUPERSEDED** (Auto-Discover leads removed, Phase 5) | 3 component tests | Contacts table with stage badges, VIT alumni indicators, Auto-Discover Target Leads modal, copyable connection note modal (<300 chars), and referral follow-up generator. |
+| **S4-8** | Gmail Mailbox Sync & Simulator UI | `web/src/components/GmailSync.tsx` | **SUPERSEDED** (simulator replaced by labelled demo tools, Phase 6) | 1 component test | Google account connection card, "Sync Inbox Now" action, interactive live email simulator for interviewer invitations and connection acceptances, classified event stream. |
 | **S4-9** | Daily Briefing Executive Cockpit UI | `web/src/components/DailyBriefing.tsx` | **DONE** | 1 component test | Executive overview cards, urgent "Needs Attention" alert highlight, formatted Markdown briefing, "Refresh Briefing Now" trigger, and historical briefing selector. |
 | **S4-10** | Unified 7-Tab Dashboard & Job Import Modal | `web/src/components/Dashboard.tsx` | **DONE** | 6 component tests | Top navigation expanded to 7 tabs (🎯 Job Discovery, 📋 Pipeline, 🤝 Networking CRM, 📬 Gmail Sync, 📰 Daily Briefing, 🏢 Target Companies, 👤 Profile & Resume; the Target Companies tab was later removed — see P3-7) + inline "+ Import Job" modal for Wellfound and LinkedIn URLs. |
 
@@ -140,14 +237,6 @@ This board tracks the priority, status, test verification, and architecture deci
 | M7-1 | 1 | Automated DB Backup (`scripts/backup.sh`) | DevOps Agent | **DONE** | Shell verified | Atomic `pg_dump` with SHA256 checksum & 0600 permissions |
 | M7-2 | 1 | Automated DB Restore (`scripts/restore.sh`) | DevOps Agent | **DONE** | Shell verified | Pre-flight validation, clean restore, `--force` flag |
 | M7-3 | 1 | Security & Trust Boundaries (`docs/SECURITY.md`) | Security Agent | **DONE** | Documented | Audit logging, prompt injection defense, HITL gate |
-
----
-
-## Test Suite Execution Summary
-
-- **Backend Test Suites:** 25 files, **82 passed** (0 failed).
-- **Frontend Test Suites:** 9 files, **24 passed** (0 failed).
-- **Total Tests Passing:** **106 / 106 (100% green)**.
 
 ---
 
