@@ -35,7 +35,12 @@ Stack: Express 5 + TypeScript + Prisma/PostgreSQL (`server/`), Next.js 16 + Reac
 ## Features
 
 The dashboard (`http://localhost:3000`) has seven tabs. The active tab is kept in the URL
-(`?tab=DISCOVERY`, `?tab=GMAIL`, …), so links and OAuth redirects land on the right view.
+(`?tab=DISCOVERY`, `?tab=GMAIL`, …), so links and OAuth redirects land on the right view. Deep
+links can also target one record: `?tab=PIPELINE&id=<application>`, `?tab=NETWORKING&id=<contact>`
+(or `&companyKey=` / `&company=` to prefilter), `?tab=DISCOVERY&id=<job>`, `?tab=GMAIL&id=<email>`
+and `?tab=WELLFOUND&id=<run>` (opens History & Diagnostics on that run). The linked record is
+highlighted and fetched even if the current filters would hide it. The briefing and the Gmail
+summary use these links.
 
 ### Job Discovery
 

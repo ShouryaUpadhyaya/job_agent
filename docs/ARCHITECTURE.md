@@ -89,6 +89,9 @@ the briefing once per IST day at or after 20:00 IST, catching up if 20:00 was mi
 ## Web
 
 `web/src/app/page.tsx` renders `components/Dashboard.tsx`, which keeps the active tab in `?tab=`.
+Record deep links (`?tab=PIPELINE&id=…`, `?tab=NETWORKING&companyKey=…`, etc.) are parsed by
+`web/src/lib/urlParams.ts`; each tab highlights (and fetches if needed) the linked record. The
+briefing and Gmail summary emit these links.
 Tabs: Job Discovery (with the Manage sources drawer), Wellfound AutoApply, Application Pipeline,
 Networking CRM, Gmail, Daily Briefing, Profile & Resume. Each tab is a top-level component plus a
 folder of subcomponents. All requests go through `web/src/lib/api.ts`.

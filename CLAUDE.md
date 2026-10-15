@@ -81,7 +81,7 @@ Maintenance (from `server/`, dry run unless `--apply`; `pg_dump` first via `./sc
 
 **Scheduler (`scheduler/cron.ts`):** `ConnectorScheduler` every `SYNC_INTERVAL_MINUTES`: job sync → liveness (40 listings > 7 days) → Wellfound CSV import → Gmail sync (`GMAIL_AUTO_SYNC`, connected only). `DailyBriefingTrigger` checks every 5 min and on start; generates once at/after 20:00 IST with catch-up and 30-min backoff after failure.
 
-**Web:** `app/page.tsx` → `components/Dashboard.tsx`, tabs synced to `?tab=` (DISCOVERY, WELLFOUND, PIPELINE, NETWORKING, GMAIL, BRIEFING, PROFILE; `?tab=SOURCES` opens the Discovery sources drawer). Each tab has a top-level component plus a folder (`discovery/`, `wellfound/`, `pipeline/`, `networking/`, `gmail/`, `briefing/`, `profile/`). All requests go through `lib/api.ts` (`NEXT_PUBLIC_API_URL`, default `http://localhost:3001`). Tests are colocated `*.test.tsx`.
+**Web:** `app/page.tsx` → `components/Dashboard.tsx`, tabs synced to `?tab=` (DISCOVERY, WELLFOUND, PIPELINE, NETWORKING, GMAIL, BRIEFING, PROFILE; `?tab=SOURCES` opens the Discovery sources drawer). Record deep links (`&id=`, `&companyKey=`, `&company=`) go through `lib/urlParams.ts` (`useDeepLink(tab)`, link builder); the Dashboard drops them on tab switch. Each tab has a top-level component plus a folder (`discovery/`, `wellfound/`, `pipeline/`, `networking/`, `gmail/`, `briefing/`, `profile/`). All requests go through `lib/api.ts` (`NEXT_PUBLIC_API_URL`, default `http://localhost:3001`). Tests are colocated `*.test.tsx`.
 
 **Tests:** server tests in `server/src/__tests__/`, colocated `*.test.ts`, and `server/tests/`; supertest against `app`.
 
