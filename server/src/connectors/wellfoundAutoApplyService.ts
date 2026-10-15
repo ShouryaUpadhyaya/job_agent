@@ -5,6 +5,7 @@ import { processAndUpsertJob } from '../jobs/normalization';
 import { companyKey } from '../lib/company';
 import { canTransition, statusForStage } from '../lib/stages';
 import { ensureActiveProfile } from '../lib/profile';
+import { recordApplicationCreated, recordApplicationUpdate } from '../applications/audit';
 import { istDateKey, parseRunnerTimestamp } from '../lib/time';
 import { csvFile } from '../wellfound/paths';
 
@@ -223,11 +224,16 @@ export async function syncWellfoundApplicationsFromCsv(csvPath?: string): Promis
         if (!existing.source) data.source = 'wellfound';
         if (!existing.companyKey && key) data.companyKey = key;
         if (!existing.appliedUrl && job.url) data.appliedUrl = job.url;
-        if (Object.keys(data).length) await prisma.jobApplication.update({ where: { id: existing.id }, data });
+        if (Object.keys(data).length) {
+          await prisma.jobApplication.update({ where: { id: existing.id }, data });
+          if (data.stage) {
+            await recordApplicationUpdate({ applicationId: existing.id, changes: data, fromStage: existing.stage, source: 'wellfound' });
+          }
+        }
         continue;
       }
 
-      await prisma.jobApplication.create({
+      const created = await prisma.jobApplication.create({
         data: {
           jobListingId: listing.id,
           candidateProfileId: profile.id,
@@ -241,6 +247,7 @@ export async function syncWellfoundApplicationsFromCsv(csvPath?: string): Promis
           notes: `Submitted via Wellfound auto-apply${job.submittedAt ? ` on ${istDateKey(job.submittedAt)} (IST)` : ''}.${job.salary ? ` Salary: ${job.salary}` : ''}`,
         },
       });
+      await recordApplicationCreated({ applicationId: created.id, jobListingId: listing.id, stage: created.stage, source: 'wellfound' });
       result.newImported++;
     } catch (err: any) {
       result.errors.push(`"${job.role} @ ${job.company || '?'}": ${err.message}`);

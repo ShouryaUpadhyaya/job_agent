@@ -9,6 +9,7 @@ import {
   getApplicationDto,
   listApplications,
 } from '../applications/service';
+import { recordApplicationCreated, recordApplicationUpdate } from '../applications/audit';
 
 export const applicationsRouter = Router();
 
@@ -116,12 +117,11 @@ applicationsRouter.post('/applications', async (req: Request, res: Response) => 
       select: { id: true, stage: true },
     });
 
-    await prisma.auditLog.create({
-      data: {
-        action: 'JOB_APPLICATION_CREATED',
-        entityId: created.id,
-        metadata: { jobListingId, stage: created.stage },
-      },
+    await recordApplicationCreated({
+      applicationId: created.id,
+      jobListingId,
+      stage: created.stage,
+      source: source ?? 'manual',
     });
 
     const dto = await getApplicationDto(created.id);
@@ -166,13 +166,7 @@ applicationsRouter.patch('/applications/:id', async (req: Request, res: Response
 
     if (Object.keys(updateData).length) {
       await prisma.jobApplication.update({ where: { id }, data: updateData });
-      await prisma.auditLog.create({
-        data: {
-          action: 'JOB_APPLICATION_UPDATED',
-          entityId: id,
-          metadata: JSON.parse(JSON.stringify({ changes: updateData, from: { stage: existing.stage } })),
-        },
-      });
+      await recordApplicationUpdate({ applicationId: id, changes: updateData, fromStage: existing.stage, source: 'manual' });
     }
 
     res.json(await getApplicationDto(id));

@@ -349,6 +349,20 @@ describe('effects', () => {
     expect((await prisma.jobApplication.findUnique({ where: { id: frontend.id } }))?.stage).toBe('APPLIED');
   });
 
+  it('writes the same audit entries as manual edits for stage changes and created applications', async () => {
+    const a = await makeApp('Postman', 'Backend Intern');
+    await proc('e-audit-1', 'no-reply@us.greenhouse-mail.io', 'Interview invitation: Backend Intern at Postman', 'Schedule your technical interview here.');
+    const updates = await prisma.auditLog.findMany({ where: { entityId: a.id, action: 'JOB_APPLICATION_UPDATED' } });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].metadata).toEqual({ changes: { stage: 'INTERVIEWING' }, from: { stage: 'APPLIED' }, source: 'email' });
+
+    const r = await proc('e-audit-2', 'no-reply@us.greenhouse-mail.io', 'Thank you for applying to Atlassian', 'We have received your application for the Software Engineer Intern role at Atlassian.');
+    expect(r.event.classification).toBe('APPLICATION_CONFIRMATION');
+    const created = await prisma.auditLog.findMany({ where: { entityId: r.event.jobApplicationId!, action: 'JOB_APPLICATION_CREATED' } });
+    expect(created).toHaveLength(1);
+    expect(created[0].metadata).toMatchObject({ stage: 'APPLIED', source: 'email' });
+  });
+
   it('assessment keeps the stage and adds a dated note', async () => {
     const a = await makeApp('Swiggy', 'SDE Intern');
     await proc('e4', 'support@hackerrankforwork.com', 'Swiggy SDE Intern assessment', 'Swiggy has invited you to take the online assessment. Complete it within 72 hours.', 'HackerRank');

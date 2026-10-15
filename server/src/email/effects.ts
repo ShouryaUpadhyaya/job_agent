@@ -14,6 +14,7 @@ import { prisma } from '../db';
 import { companyKey } from '../lib/company';
 import { canTransition, statusForStage, Stage } from '../lib/stages';
 import { ensureActiveProfile } from '../lib/profile';
+import { recordApplicationCreated, recordStageChange } from '../applications/audit';
 import { createContact, findDuplicate } from '../networking/contacts';
 import { transitionData } from '../networking/crm';
 import { generateMessage } from '../networking/messages';
@@ -118,6 +119,7 @@ async function applyStage(app: AppWithListing, to: Stage, email: EffectEmail): P
       ...(to === 'APPLIED' && !app.submittedAt ? { submittedAt: email.receivedAt } : {}),
     },
   });
+  await recordStageChange(app.id, app.stage, to, 'email');
   return { applicationId: app.id, from: app.stage, to };
 }
 
@@ -141,7 +143,7 @@ async function createApplicationFromEmail(cls: ClassificationResult, email: Effe
       publishedAt: null,
     },
   });
-  return prisma.jobApplication.create({
+  const created = await prisma.jobApplication.create({
     data: {
       jobListingId: listing.id,
       candidateProfileId: profile.id,
@@ -155,6 +157,8 @@ async function createApplicationFromEmail(cls: ClassificationResult, email: Effe
       notes: `Created from application confirmation email "${email.subject.slice(0, 140)}".`,
     },
   });
+  await recordApplicationCreated({ applicationId: created.id, jobListingId: listing.id, stage: created.stage, source: 'email' });
+  return created;
 }
 
 const PERSON_NAME = /^[\p{L}][\p{L}.'’-]*(?:\s+[\p{L}][\p{L}.'’-]*){1,3}$/u;

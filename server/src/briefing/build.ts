@@ -328,7 +328,7 @@ interface Movement {
   applicationId: string;
   to: string;
   from?: string;
-  via: 'manual' | 'email' | 'created' | 'updated';
+  via: 'manual' | 'email' | 'wellfound' | 'created' | 'updated';
 }
 
 /** Stage changes today from the audit log (manual edits), stage-changing emails, and updatedAt as a last resort. */
@@ -368,7 +368,8 @@ async function loadMovements(w: BriefingWindow) {
       const from = meta?.from?.stage;
       if (typeof to === 'string' && to !== from) {
         const prev = moves.get(a.entityId);
-        moves.set(a.entityId, { applicationId: a.entityId, to, from: prev?.from ?? from, via: 'manual' });
+        const via = meta?.source === 'email' ? 'email' : meta?.source === 'wellfound' ? 'wellfound' : 'manual';
+        moves.set(a.entityId, { applicationId: a.entityId, to, from: prev?.from ?? from, via });
       }
     } else if (a.action === 'APPLICATION_SUBMITTED_WITH_HUMAN_APPROVAL') {
       const prev = moves.get(a.entityId);
@@ -410,7 +411,7 @@ async function movementSection(w: BriefingWindow) {
   for (const m of stageMoves) {
     const app = byId.get(m.applicationId);
     if (!app) continue; // deleted since
-    const viaText = { manual: 'you updated it', email: 'from an email', created: 'added today', updated: 'updated today' }[m.via];
+    const viaText = { manual: 'you updated it', email: 'from an email', wellfound: 'from Wellfound auto-apply', created: 'added today', updated: 'updated today' }[m.via];
     items.push({
       key: `move:${m.applicationId}`,
       kind: m.to === 'REJECTED' ? 'REJECTION' : m.to === 'OFFERED' ? 'OFFER' : 'STAGE_CHANGE',

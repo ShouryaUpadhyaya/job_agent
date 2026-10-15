@@ -119,6 +119,15 @@ describe('CSV → pipeline sync', () => {
     expect(after[a.id]).toBe('INTERVIEWING');
     expect(after[b.id]).toBe('REJECTED');
     expect(after[c.id]).toBe('APPLIED');
+
+    // Audit trail: one CREATED per import and an UPDATED only for the advanced application.
+    const ids = apps.map((x) => x.id);
+    const created = await prisma.auditLog.findMany({ where: { entityId: { in: ids }, action: 'JOB_APPLICATION_CREATED' } });
+    expect(created).toHaveLength(3);
+    expect(created.every((x) => (x.metadata as any).source === 'wellfound' && (x.metadata as any).stage === 'APPLIED')).toBe(true);
+    const updated = await prisma.auditLog.findMany({ where: { entityId: { in: ids }, action: 'JOB_APPLICATION_UPDATED' } });
+    expect(updated.map((x) => x.entityId)).toEqual([c.id]);
+    expect(updated[0].metadata).toMatchObject({ changes: { stage: 'APPLIED' }, from: { stage: 'BOOKMARKED' }, source: 'wellfound' });
   });
 
   it('matches an application tracked from another source by companyKey + title', async () => {
